@@ -137,9 +137,9 @@ func runMCPShare(cmd *cobra.Command, args []string) error {
 		},
 	}
 	s, err := internalui.FormatJSON(openCodeConfig, noColor)
-		if err != nil {
-			return fmt.Errorf("failed to format JSON: %w", err)
-		}
+	if err != nil {
+		return fmt.Errorf("failed to format JSON: %w", err)
+	}
 	fmt.Println(s)
 	fmt.Println()
 

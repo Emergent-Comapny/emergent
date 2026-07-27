@@ -303,6 +303,30 @@ func TestNormalizePropertyCrossRefs_NonObjectPassthrough(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// loadDocumentText — GAP 5
+// ---------------------------------------------------------------------------
+
+func TestLoadDocumentText_EmptyDocID(t *testing.T) {
+	s := &Service{log: slog.Default()}
+	result := s.loadDocumentText(context.Background(), "")
+	if result != "" {
+		t.Errorf("loadDocumentText(\"\") should return empty string, got %q", result)
+	}
+}
+
+func TestLoadDocumentText_NilDocSvc(t *testing.T) {
+	s := &Service{log: slog.Default()}
+	result := s.loadDocumentText(context.Background(), "550e8400-e29b-41d4-a716-446655440000")
+	if result != "" {
+		t.Errorf("loadDocumentText with nil docSvc should return empty string, got %q", result)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// buildTypeDiscoveryPrompt
+// ---------------------------------------------------------------------------
+
 // TestBuildTypeDiscoveryPrompt_IncludesKBPurpose verifies assumption D1:
 // the kbPurpose string passed to buildTypeDiscoveryPrompt appears verbatim
 // in the returned prompt, so the LLM receives domain context.

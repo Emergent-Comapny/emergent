@@ -62,7 +62,9 @@ var sessionsCreateCmd = &cobra.Command{
 
 		if jsonFlag || output == "json" {
 			out, err := internalui.FormatJSON(session, noColor)
-			if err != nil { return err }
+			if err != nil {
+				return err
+			}
 			fmt.Println(out)
 			return nil
 		}
@@ -98,7 +100,9 @@ var sessionsListCmd = &cobra.Command{
 
 		if jsonFlag || output == "json" {
 			out, err := internalui.FormatJSON(resp, noColor)
-			if err != nil { return err }
+			if err != nil {
+				return err
+			}
 			fmt.Println(out)
 			return nil
 		}
@@ -145,7 +149,9 @@ var sessionsGetCmd = &cobra.Command{
 
 		if jsonFlag || output == "json" {
 			out, err := internalui.FormatJSON(session, noColor)
-			if err != nil { return err }
+			if err != nil {
+				return err
+			}
 			fmt.Println(out)
 			return nil
 		}
@@ -205,7 +211,9 @@ as a snapshot at spawn time. The child then operates independently — no live s
 
 		if jsonFlag || output == "json" {
 			out, err := internalui.FormatJSON(result, noColor)
-			if err != nil { return err }
+			if err != nil {
+				return err
+			}
 			fmt.Println(out)
 			return nil
 		}
@@ -269,7 +277,9 @@ var messagesAddCmd = &cobra.Command{
 
 		if jsonFlag || output == "json" {
 			out, err := internalui.FormatJSON(msg, noColor)
-			if err != nil { return err }
+			if err != nil {
+				return err
+			}
 			fmt.Println(out)
 			return nil
 		}
@@ -307,7 +317,9 @@ var messagesListCmd = &cobra.Command{
 
 		if jsonFlag || output == "json" {
 			out, err := internalui.FormatJSON(resp, noColor)
-			if err != nil { return err }
+			if err != nil {
+				return err
+			}
 			fmt.Println(out)
 			return nil
 		}

@@ -236,4 +236,3 @@ func pickResourceWithTitle(title string, items []PickerItem, timeout time.Durati
 
 	return fm.result.ID, fm.result.Name, nil
 }
-

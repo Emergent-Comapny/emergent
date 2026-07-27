@@ -17,7 +17,6 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
 
-
 	"github.com/emergent-company/emergent.memory/domain/discoveryjobs"
 	"github.com/emergent-company/emergent.memory/domain/documents"
 	"github.com/emergent-company/emergent.memory/domain/graph"
@@ -1384,7 +1383,7 @@ func printDiffTable(t *testing.T, pass1, pass2 extractionSnapshot) {
 
 	// Schema comparison
 	type schemaDiff struct {
-		TypeName  string
+		TypeName   string
 		PropsPass1 int
 		PropsPass2 int
 		Changed    string
@@ -1403,10 +1402,16 @@ func printDiffTable(t *testing.T, pass1, pass2 extractionSnapshot) {
 		}
 	}
 	allTypeNames := map[string]bool{}
-	for tn := range propMap1 { allTypeNames[tn] = true }
-	for tn := range propMap2 { allTypeNames[tn] = true }
+	for tn := range propMap1 {
+		allTypeNames[tn] = true
+	}
+	for tn := range propMap2 {
+		allTypeNames[tn] = true
+	}
 	var sortedTypes []string
-	for tn := range allTypeNames { sortedTypes = append(sortedTypes, tn) }
+	for tn := range allTypeNames {
+		sortedTypes = append(sortedTypes, tn)
+	}
 	sort.Strings(sortedTypes)
 	for _, tn := range sortedTypes {
 		p1 := propMap1[tn]
@@ -1434,10 +1439,16 @@ func printDiffTable(t *testing.T, pass1, pass2 extractionSnapshot) {
 
 	// Object comparison
 	allObjTypes := map[string]bool{}
-	for tn := range pass1.ObjectStats { allObjTypes[tn] = true }
-	for tn := range pass2.ObjectStats { allObjTypes[tn] = true }
+	for tn := range pass1.ObjectStats {
+		allObjTypes[tn] = true
+	}
+	for tn := range pass2.ObjectStats {
+		allObjTypes[tn] = true
+	}
 	var sortedObjTypes []string
-	for tn := range allObjTypes { sortedObjTypes = append(sortedObjTypes, tn) }
+	for tn := range allObjTypes {
+		sortedObjTypes = append(sortedObjTypes, tn)
+	}
 	sort.Strings(sortedObjTypes)
 
 	t.Logf("")
@@ -1455,8 +1466,17 @@ func printDiffTable(t *testing.T, pass1, pass2 extractionSnapshot) {
 
 	// Total summary
 	var total1, total2, total1Del, total2Del, total2Vge2, total1Branch, total2Branch int
-	for _, os := range pass1.ObjectStats { total1 += os.TotalObjects; total1Del += os.Deleted; total1Branch += os.OnBranch }
-	for _, os := range pass2.ObjectStats { total2 += os.TotalObjects; total2Del += os.Deleted; total2Vge2 += os.VersionGe2; total2Branch += os.OnBranch }
+	for _, os := range pass1.ObjectStats {
+		total1 += os.TotalObjects
+		total1Del += os.Deleted
+		total1Branch += os.OnBranch
+	}
+	for _, os := range pass2.ObjectStats {
+		total2 += os.TotalObjects
+		total2Del += os.Deleted
+		total2Vge2 += os.VersionGe2
+		total2Branch += os.OnBranch
+	}
 
 	t.Logf("")
 	t.Logf("── Overall Summary ──")
@@ -1485,10 +1505,16 @@ func printDiffTable(t *testing.T, pass1, pass2 extractionSnapshot) {
 
 	// Relationship comparison
 	allRelTypes := map[string]bool{}
-	for rn := range pass1.RelStats { allRelTypes[rn] = true }
-	for rn := range pass2.RelStats { allRelTypes[rn] = true }
+	for rn := range pass1.RelStats {
+		allRelTypes[rn] = true
+	}
+	for rn := range pass2.RelStats {
+		allRelTypes[rn] = true
+	}
 	var sortedRelTypes []string
-	for rn := range allRelTypes { sortedRelTypes = append(sortedRelTypes, rn) }
+	for rn := range allRelTypes {
+		sortedRelTypes = append(sortedRelTypes, rn)
+	}
 	sort.Strings(sortedRelTypes)
 
 	t.Logf("")
@@ -2069,7 +2095,7 @@ func TestReExtractionFriendsE03(t *testing.T) {
 	svr := testutil.NewTestServerWithLLM(testDB)
 	client := testutil.NewHTTPClient(svr.Echo)
 
-	episodes := []struct{
+	episodes := []struct {
 		Label string
 		Doc   string
 	}{
@@ -2166,7 +2192,9 @@ func TestReExtractionFriendsE03(t *testing.T) {
 // TotalObjects returns the sum of all graph objects in the snapshot.
 func (s extractionSnapshot) TotalObjects() int {
 	n := 0
-	for _, os := range s.ObjectStats { n += os.TotalObjects }
+	for _, os := range s.ObjectStats {
+		n += os.TotalObjects
+	}
 	return n
 }
 
@@ -2175,10 +2203,16 @@ func progressDiff(t *testing.T, before, after extractionSnapshot, labelA, labelB
 	t.Helper()
 
 	allTypes := map[string]bool{}
-	for tn := range before.ObjectStats { allTypes[tn] = true }
-	for tn := range after.ObjectStats { allTypes[tn] = true }
+	for tn := range before.ObjectStats {
+		allTypes[tn] = true
+	}
+	for tn := range after.ObjectStats {
+		allTypes[tn] = true
+	}
 	var sorted []string
-	for tn := range allTypes { sorted = append(sorted, tn) }
+	for tn := range allTypes {
+		sorted = append(sorted, tn)
+	}
 	sort.Strings(sorted)
 
 	t.Logf("  %-25s %10s %10s %8s %8s", "TYPE", labelA, labelB, "NEW", "UPDATED")
@@ -2199,8 +2233,12 @@ func progressDiff(t *testing.T, before, after extractionSnapshot, labelA, labelB
 	}
 
 	relsA, relsB := 0, 0
-	for _, rs := range before.RelStats { relsA += rs.Total }
-	for _, rs := range after.RelStats { relsB += rs.Total }
+	for _, rs := range before.RelStats {
+		relsA += rs.Total
+	}
+	for _, rs := range after.RelStats {
+		relsB += rs.Total
+	}
 
 	t.Logf("  %-25s %10s %10s %8s %8s", strings.Repeat("─", 25), strings.Repeat("─", 10), strings.Repeat("─", 10), strings.Repeat("─", 8), strings.Repeat("─", 8))
 	t.Logf("  %-25s %10d %10d %+8d %+8d", "TOTAL", totA, totB, totB-totA, totUpd)
@@ -2310,7 +2348,9 @@ func assertEntityExists(t *testing.T, ctx context.Context, db bun.IDB, projectID
 }
 
 func safeStr(s *string) string {
-	if s == nil { return "<nil>" }
+	if s == nil {
+		return "<nil>"
+	}
 	return *s
 }
 

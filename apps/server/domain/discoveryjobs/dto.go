@@ -53,8 +53,8 @@ type CancelJobResponse struct {
 
 // FinalizeDiscoveryRequest is the request body for finalizing discovery
 type FinalizeDiscoveryRequest struct {
-	PackName              string                 `json:"packName"`
-	Mode                  string                 `json:"mode" validate:"required,oneof=create extend enrich create_rich create_rich_combined create_rich_sequential"`
+	PackName string `json:"packName"`
+	Mode     string `json:"mode" validate:"required,oneof=create extend enrich create_rich create_rich_combined create_rich_sequential"`
 	// DocumentID is used by enrich and create_rich modes to load document text
 	// for server-side schema property generation.
 	DocumentID            string                 `json:"documentId,omitempty"`

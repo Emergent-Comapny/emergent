@@ -82,15 +82,15 @@ func (r *Repository) EnsurePersonalKBAgent(ctx context.Context, projectID string
 	temp := float32(0.2)
 	maxSteps := 20
 	def := &AgentDefinition{
-		ProjectID:   projectID,
-		Name:        name,
-		Description: strPtr("Personal knowledge base assistant — saves and recalls your notes, contacts, events, and facts"),
+		ProjectID:    projectID,
+		Name:         name,
+		Description:  strPtr("Personal knowledge base assistant — saves and recalls your notes, contacts, events, and facts"),
 		SystemPrompt: strPtr(personalKBAgentSystemPrompt),
-		Visibility:  VisibilityExternal,
-		Skills:      []string{},
-		BannedTools: []string{},
-		MaxSteps:    &maxSteps,
-		Model:       &ModelConfig{Temperature: &temp},
+		Visibility:   VisibilityExternal,
+		Skills:       []string{},
+		BannedTools:  []string{},
+		MaxSteps:     &maxSteps,
+		Model:        &ModelConfig{Temperature: &temp},
 		Tools: []string{
 			"entity-type-list",
 			"entity-create",

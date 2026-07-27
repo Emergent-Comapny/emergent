@@ -43,6 +43,7 @@ func strPtr(s string) *string { return &s }
 //  7. Reserved tool prefix (memory_*)         → 400
 //  8. Client tool definition (no-op)          — 200 / 400 without LLM
 //  9. Agent:prefix model name accepted        — same as bare name
+//
 // 10. (LLM) Client tool roundtrip            — tool_calls + resume
 type AgentCompatTestSuite struct {
 	suite.Suite
@@ -646,10 +647,10 @@ func (s *AgentCompatTestSuite) TestChatCompletion_StreamingWithContent() {
 // TestChatCompletion_MultiTurnConversation sends a sequence of messages that
 // require the agent to remember earlier turns in the same conversation.
 //
-//  Turn 1: "My favourite colour is ultraviolet. Acknowledge this."
-//          → agent should say it noted the colour.
-//  Turn 2: "What is my favourite colour?"
-//          → agent must recall "ultraviolet" from turn 1.
+//	Turn 1: "My favourite colour is ultraviolet. Acknowledge this."
+//	        → agent should say it noted the colour.
+//	Turn 2: "What is my favourite colour?"
+//	        → agent must recall "ultraviolet" from turn 1.
 //
 // This exercises that the messages[] history is correctly threaded through
 // to the agent so context is preserved across stateless HTTP requests.
@@ -712,9 +713,9 @@ func (s *AgentCompatTestSuite) TestChatCompletion_MultiTurnConversation() {
 // TestChatCompletion_MultiStepToolChain exercises two back-to-back suspend/resume
 // cycles in a single conversation:
 //
-//  Step 1: agent calls tool_a ("get_user_name")  → paused, client returns "Alice"
-//  Step 2: agent calls tool_b ("get_user_score") → paused, client returns 42
-//  Step 3: agent produces a final summary using both results → finish_reason:stop
+//	Step 1: agent calls tool_a ("get_user_name")  → paused, client returns "Alice"
+//	Step 2: agent calls tool_b ("get_user_score") → paused, client returns 42
+//	Step 3: agent produces a final summary using both results → finish_reason:stop
 //
 // This verifies that the suspend context is correctly updated between successive
 // client-tool calls and that the executor resumes cleanly multiple times.
@@ -828,13 +829,13 @@ func (s *AgentCompatTestSuite) TestChatCompletion_MultiStepToolChain() {
 // TestPerformance_AgentVsDirectLLM benchmarks a 3-step stateless conversation
 // through two paths and logs the latency breakdown:
 //
-//  Path A — Memory agent via /v1/chat/completions (agentcompat layer):
-//            Each turn rebuilds the full messages[] array and re-executes a
-//            fresh agent run with history injected via system prompt appendix.
+//	Path A — Memory agent via /v1/chat/completions (agentcompat layer):
+//	          Each turn rebuilds the full messages[] array and re-executes a
+//	          fresh agent run with history injected via system prompt appendix.
 //
-//  Path B — Direct LLM calls to the provider (LiteLLM/OpenAI API):
-//            Each turn calls the provider directly with the accumulated
-//            messages[] array, bypassing Memory entirely.
+//	Path B — Direct LLM calls to the provider (LiteLLM/OpenAI API):
+//	          Each turn calls the provider directly with the accumulated
+//	          messages[] array, bypassing Memory entirely.
 //
 // The 3 steps:
 //  1. "My secret number is 7. Acknowledge."
@@ -855,7 +856,10 @@ func (s *AgentCompatTestSuite) TestPerformance_AgentVsDirectLLM() {
 
 	// ── Path A: Memory agent ──────────────────────────────────────────────
 	s.T().Log("=== Path A: Memory agent (agentcompat) ===")
-	var agentTurns []struct{ latency time.Duration; reply string }
+	var agentTurns []struct {
+		latency time.Duration
+		reply   string
+	}
 	agentMessages := []map[string]any{}
 	agentTotal := time.Duration(0)
 
@@ -906,7 +910,10 @@ func (s *AgentCompatTestSuite) TestPerformance_AgentVsDirectLLM() {
 	}
 
 	s.T().Log("=== Path B: Direct LLM ===")
-	var llmTurns []struct{ latency time.Duration; reply string }
+	var llmTurns []struct {
+		latency time.Duration
+		reply   string
+	}
 	llmMessages := []map[string]any{}
 	llmTotal := time.Duration(0)
 

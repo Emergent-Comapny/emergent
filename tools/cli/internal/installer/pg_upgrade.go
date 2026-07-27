@@ -20,7 +20,6 @@ const (
 	// Docker Compose prepends the project name to produce the real Docker volume name,
 	// e.g. "<project>_postgres_data".
 	pgVolumeBaseName = "postgres_data"
-
 )
 
 // pgTuningConfig holds the computed PostgreSQL memory/WAL tuning parameters

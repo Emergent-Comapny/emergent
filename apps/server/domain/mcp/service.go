@@ -1249,6 +1249,104 @@ func (s *Service) GetToolDefinitions() []ToolDefinition {
 		},
 	})
 
+	// Agent Notes tools
+	tools = append(tools, ToolDefinition{
+		Name:          "save_note",
+		Description:   "Create or update a note in the project. Notes are agent observations (preferences, patterns, corrections, facts, instructions, conventions) that persist across sessions. If a semantically similar note exists, a merge decision is made. Notes can optionally annotate a graph entity.",
+		RequiredScope: "graph:write",
+		InputSchema: InputSchema{
+			Type: "object",
+			Properties: map[string]PropertySchema{
+				"content": {
+					Type:        "string",
+					Description: "The observation in natural language. Be specific and self-contained.",
+				},
+				"category": {
+					Type:        "string",
+					Description: "Category: preference, pattern, correction, fact, instruction, or convention",
+				},
+				"entity_id": {
+					Type:        "string",
+					Description: "Optional UUID of the graph entity this note annotates. Omit for free-standing notes.",
+				},
+				"source": {
+					Type:        "string",
+					Description: "Source: explicit (user said it), inferred (agent noticed), corrected (user corrected agent). Default: inferred",
+				},
+				"event_time": {
+					Type:        "string",
+					Description: "Optional ISO 8601 timestamp of when the described event occurred.",
+				},
+			},
+			Required: []string{"content", "category"},
+		},
+	})
+	tools = append(tools, ToolDefinition{
+		Name:          "recall_notes",
+		Description:   "Retrieve relevant notes for the current context. Uses semantic search to find notes matching the query, optionally filtered by category or entity. Returns up to 50 results in order of relevance.",
+		RequiredScope: "graph:read",
+		InputSchema: InputSchema{
+			Type: "object",
+			Properties: map[string]PropertySchema{
+				"query": {
+					Type:        "string",
+					Description: "What you are looking for. Use natural language.",
+				},
+				"entity_ids": {
+					Type:        "array",
+					Description: "Optional list of entity UUIDs to anchor retrieval. Traverses ANNOTATES edges from these entities, then supplements with semantic search.",
+					Items: &PropertySchema{
+						Type: "string",
+					},
+				},
+				"category": {
+					Type:        "string",
+					Description: "Optional filter by category: preference, pattern, correction, fact, instruction, or convention",
+				},
+				"limit": {
+					Type:        "integer",
+					Description: "Maximum number of notes to return. Default 10, max 50.",
+				},
+			},
+			Required: []string{"query"},
+		},
+	})
+	tools = append(tools, ToolDefinition{
+		Name:          "manage_notes",
+		Description:   "List, update, delete, or promote notes. Use 'list' to browse notes (optionally filtered by category or entity_id), 'update' to modify note properties, 'delete' to soft-delete a note, or 'promote_to_core' to promote a note to tier=core (injected into every session prompt).",
+		RequiredScope: "graph:write",
+		InputSchema: InputSchema{
+			Type: "object",
+			Properties: map[string]PropertySchema{
+				"action": {
+					Type:        "string",
+					Description: "Action: list, update, delete, or promote_to_core",
+				},
+				"note_id": {
+					Type:        "string",
+					Description: "UUID of the note. Required for update, delete, promote_to_core.",
+				},
+				"updates": {
+					Type:        "object",
+					Description: "For update: fields to change (content, category, confidence, tier).",
+				},
+				"category": {
+					Type:        "string",
+					Description: "For list: filter by category.",
+				},
+				"entity_id": {
+					Type:        "string",
+					Description: "For list: filter to notes annotating this entity.",
+				},
+				"limit": {
+					Type:        "integer",
+					Description: "For list: max results. Default 20.",
+				},
+			},
+			Required: []string{"action"},
+		},
+	})
+
 	// Apply RequiredScope from the central map to any tool that doesn't already have one set.
 	// Tools in dynamic *_tools.go files set RequiredScope directly; this covers static tools.
 	for i := range tools {
@@ -1360,6 +1458,10 @@ var toolRequiredScope = map[string]string{
 	// Journal (static tools; journal-list and journal-add-note are also appended below)
 	"journal-list":     "journal:read",
 	"journal-add-note": "journal:write",
+	// Agent Notes
+	"save_note":    "graph:write",
+	"recall_notes": "graph:read",
+	"manage_notes": "graph:write",
 }
 
 // FilterToolsForScopes filters tools based on token scopes.
@@ -1767,6 +1869,14 @@ func (s *Service) ExecuteTool(ctx context.Context, projectID string, toolName st
 		return s.executeJournalList(ctx, projectID, args)
 	case "journal-add-note":
 		return s.executeJournalAddNote(ctx, projectID, args)
+
+	// Agent Notes tools
+	case "save_note":
+		return s.executeSaveNote(ctx, projectID, args)
+	case "recall_notes":
+		return s.executeRecallNotes(ctx, projectID, args)
+	case "manage_notes":
+		return s.executeManageNotes(ctx, projectID, args)
 
 	default:
 		// Attempt to route to a connected relay. Relay tools are named
@@ -4664,4 +4774,281 @@ func (s *Service) executeSetSessionTitle(ctx context.Context, projectID string, 
 	return &ToolResult{
 		Content: []ContentBlock{{Type: "text", Text: `{"ok":true}`}},
 	}, nil
+}
+
+// executeSaveNote creates or updates a Note entity in the graph.
+func (s *Service) executeSaveNote(ctx context.Context, projectID string, args map[string]any) (*ToolResult, error) {
+	content, _ := args["content"].(string)
+	category, _ := args["category"].(string)
+	entityID, _ := args["entity_id"].(string)
+	source, _ := args["source"].(string)
+	if source == "" {
+		source = "inferred"
+	}
+	eventTime, _ := args["event_time"].(string)
+
+	if content == "" {
+		return nil, fmt.Errorf("content is required")
+	}
+	if category == "" {
+		return nil, fmt.Errorf("category is required")
+	}
+
+	validCategories := map[string]bool{"preference": true, "pattern": true, "correction": true, "fact": true, "instruction": true, "convention": true}
+	if !validCategories[category] {
+		return nil, fmt.Errorf("invalid category: %s (must be preference, pattern, correction, fact, instruction, convention)", category)
+	}
+
+	// Determine confidence from source
+	confidence := 0.7
+	switch source {
+	case "explicit":
+		confidence = 1.0
+	case "corrected":
+		confidence = 0.9
+	case "inferred":
+		confidence = 0.7
+	}
+
+	// Create Note entity via batch create with inline relationships
+	props := map[string]any{
+		"content":      content,
+		"category":     category,
+		"source":       source,
+		"confidence":   confidence,
+		"tier":         "archival",
+		"use_count":    0,
+		"needs_review": false,
+	}
+	if entityID != "" {
+		props["entity_id"] = entityID
+	}
+	if eventTime != "" {
+		props["event_time"] = eventTime
+	}
+
+	labels := []string{"note", category, "archival"}
+
+	// Generate a unique key for idempotent upsert
+	noteKey := fmt.Sprintf("note-%s-%d", category, time.Now().UnixNano())
+	entitySpec := map[string]any{
+		"type":       "Note",
+		"key":        noteKey,
+		"properties": props,
+		"labels":     labels,
+	}
+
+	// If entity_id provided, create ANNOTATES relationship
+	if entityID != "" {
+		entitySpec["relationships"] = []map[string]any{
+			{"type": "ANNOTATES", "target_id": entityID},
+		}
+	}
+
+	wrapped := map[string]any{"entities": []any{entitySpec}}
+	result, err := s.executeBatchCreateEntities(ctx, projectID, wrapped)
+	if err != nil {
+		return nil, fmt.Errorf("save_note: %w", err)
+	}
+
+	// Parse the created entity ID from the batch result JSON
+	type slimEntity struct {
+		ID   string `json:"id"`
+		Type string `json:"type"`
+	}
+	type batchItem struct {
+		Success bool        `json:"success"`
+		Entity  *slimEntity `json:"entity,omitempty"`
+		Error   string      `json:"error,omitempty"`
+		Index   int         `json:"index"`
+	}
+	type batchResponse struct {
+		Results []batchItem `json:"results"`
+	}
+
+	var resp batchResponse
+	text := result.Content[0].Text
+	if err := json.Unmarshal([]byte(text), &resp); err != nil || len(resp.Results) == 0 {
+		// Return raw result if parsing fails
+		return result, nil
+	}
+
+	created := resp.Results[0]
+	if !created.Success {
+		return nil, fmt.Errorf("save_note failed: %s", created.Error)
+	}
+
+	noteID := ""
+	if created.Entity != nil {
+		noteID = created.Entity.ID
+	}
+
+	return &ToolResult{
+		Content: []ContentBlock{{
+			Type: "text",
+			Text: fmt.Sprintf("Note saved (ID: %s). Category: %s. Confidence: %.1f.",
+				noteID, category, confidence),
+		}},
+	}, nil
+}
+
+// executeRecallNotes retrieves relevant notes via hybrid search.
+func (s *Service) executeRecallNotes(ctx context.Context, projectID string, args map[string]any) (*ToolResult, error) {
+	query, _ := args["query"].(string)
+	if query == "" {
+		return nil, fmt.Errorf("query is required")
+	}
+
+	limit := 10
+	if l, ok := args["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+		if limit > 50 {
+			limit = 50
+		}
+	}
+
+	category, _ := args["category"].(string)
+
+	// Use search-hybrid filtered to Note type
+	searchArgs := map[string]any{
+		"query": query,
+		"types": []string{"Note"},
+		"limit": float64(limit),
+	}
+
+	if entityIDs, ok := args["entity_ids"].([]any); ok && len(entityIDs) > 0 {
+		var ids []string
+		for _, id := range entityIDs {
+			if s, ok := id.(string); ok {
+				ids = append(ids, s)
+			}
+		}
+		if len(ids) > 0 {
+			searchArgs["query_context"] = fmt.Sprintf("entity_ids: %s", strings.Join(ids, ","))
+		}
+	}
+
+	if category != "" {
+		searchArgs["labels"] = []string{category}
+	}
+
+	result, err := s.executeHybridSearch(ctx, projectID, searchArgs)
+	if err != nil {
+		return nil, fmt.Errorf("recall_notes: %w", err)
+	}
+
+	// Format results as notes
+	var searchResult map[string]any
+	if len(result.Content) > 0 {
+		if err := json.Unmarshal([]byte(result.Content[0].Text), &searchResult); err != nil {
+			// Return raw result if parsing fails
+			return result, nil
+		}
+	}
+
+	results, _ := searchResult["data"].([]any)
+	if len(results) == 0 {
+		return &ToolResult{Content: []ContentBlock{{Type: "text", Text: "No relevant notes found."}}}, nil
+	}
+
+	var lines []string
+	for i, r := range results {
+		item, _ := r.(map[string]any)
+		obj, _ := item["object"].(map[string]any)
+		props, _ := obj["properties"].(map[string]any)
+		content, _ := props["content"].(string)
+		cat, _ := props["category"].(string)
+		conf, _ := props["confidence"].(float64)
+		if cat == "" {
+			cat = "unknown"
+		}
+		lines = append(lines, fmt.Sprintf("%d. [%s] %s (confidence: %.1f)", i+1, cat, truncateStr(content, 200), conf))
+	}
+
+	return &ToolResult{Content: []ContentBlock{{
+		Type: "text",
+		Text: fmt.Sprintf("Found %d notes:\n%s", len(results), strings.Join(lines, "\n")),
+	}}}, nil
+}
+
+// executeManageNotes lists, updates, deletes, or promotes notes.
+func (s *Service) executeManageNotes(ctx context.Context, projectID string, args map[string]any) (*ToolResult, error) {
+	action, _ := args["action"].(string)
+	if action == "" {
+		return nil, fmt.Errorf("action is required (list, update, delete, promote_to_core)")
+	}
+
+	switch action {
+	case "list":
+		// Query Note entities with optional filters
+		queryArgs := map[string]any{
+			"type":  "Note",
+			"limit": 20.0,
+		}
+		if l, ok := args["limit"].(float64); ok && l > 0 {
+			if l > 100 {
+				l = 100
+			}
+			queryArgs["limit"] = l
+		}
+		if cat, _ := args["category"].(string); cat != "" {
+			queryArgs["labels"] = []string{cat}
+		}
+		if eid, _ := args["entity_id"].(string); eid != "" {
+			queryArgs["entity_id"] = eid
+		}
+		return s.executeQueryEntities(ctx, projectID, queryArgs)
+
+	case "update":
+		noteID, _ := args["note_id"].(string)
+		if noteID == "" {
+			return nil, fmt.Errorf("note_id is required for update")
+		}
+		updates, _ := args["updates"].(map[string]any)
+		if updates == nil {
+			return nil, fmt.Errorf("updates object is required for update")
+		}
+		updateArgs := map[string]any{
+			"entity_id":  noteID,
+			"properties": updates,
+		}
+		return s.executeUpdateEntity(ctx, projectID, updateArgs)
+
+	case "delete":
+		noteID, _ := args["note_id"].(string)
+		if noteID == "" {
+			return nil, fmt.Errorf("note_id is required for delete")
+		}
+		deleteArgs := map[string]any{
+			"entity_id": noteID,
+			"reason":    "Deleted via manage_notes tool",
+		}
+		return s.executeDeleteEntity(ctx, projectID, deleteArgs)
+
+	case "promote_to_core":
+		noteID, _ := args["note_id"].(string)
+		if noteID == "" {
+			return nil, fmt.Errorf("note_id is required for promote_to_core")
+		}
+		updateArgs := map[string]any{
+			"entity_id": noteID,
+			"properties": map[string]any{
+				"tier": "core",
+			},
+			"labels":         []string{"note", "core"},
+			"replace_labels": false,
+		}
+		return s.executeUpdateEntity(ctx, projectID, updateArgs)
+
+	default:
+		return nil, fmt.Errorf("unknown action: %s (must be list, update, delete, or promote_to_core)", action)
+	}
+}
+
+// truncateStr truncates a string to the given max length, appending "..." if truncated.
+func truncateStr(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }

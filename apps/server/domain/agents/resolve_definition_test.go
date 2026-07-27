@@ -13,7 +13,7 @@ func TestResolveDefinitionForAgent(t *testing.T) {
 	// mocked in this environment without full integration test infrastructure.
 	//
 	// We verify the NilAgent case which doesn't hit the DB.
-	
+
 	ctx := context.Background()
 	repo := NewRepository(nil)
 

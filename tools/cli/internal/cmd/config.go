@@ -201,8 +201,6 @@ overriding environment variables.`,
 	return cmd
 }
 
-
-
 // Settable keys and their mapping for standalone .env.local
 var standaloneEnvKeys = map[string]string{
 	"google_api_key":  "GOOGLE_API_KEY",

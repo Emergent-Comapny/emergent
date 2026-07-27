@@ -67,7 +67,6 @@ func (s *Server) typeColor(typeName string) string {
 	return c
 }
 
-
 // proxyGet makes a GET request to the Memory API server.
 // It automatically appends branch_id if the server is configured with one.
 func (s *Server) proxyGet(path string) ([]byte, int, error) {

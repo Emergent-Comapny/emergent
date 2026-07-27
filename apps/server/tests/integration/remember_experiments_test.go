@@ -54,12 +54,12 @@ type QualityMetrics struct {
 	TotalProperties      int      `json:"total_properties"`        // sum across all types
 	AvgPropertiesPerType float64  `json:"avg_properties_per_type"` // TotalProperties / TypeCount
 	TypeNames            []string `json:"type_names"`
-	HasExtractionHints   bool     `json:"has_extraction_hints"`    // extraction_prompts.typeHints non-empty
+	HasExtractionHints   bool     `json:"has_extraction_hints"` // extraction_prompts.typeHints non-empty
 	RelationshipCount    int      `json:"relationship_count"`
 	// SSE pipeline
-	ToolsUsedList []string `json:"tools_used"`
-	CalledFinalize bool    `json:"called_finalize"`
-	CalledReextract bool   `json:"called_reextract"`
+	ToolsUsedList   []string `json:"tools_used"`
+	CalledFinalize  bool     `json:"called_finalize"`
+	CalledReextract bool     `json:"called_reextract"`
 	// Cost / latency
 	WallMillis   int64 `json:"wall_ms"`
 	TokensInput  int   `json:"tokens_input"`
@@ -72,16 +72,16 @@ type QualityMetrics struct {
 
 // ComparisonDump holds side-by-side results for two variants of the same fixture.
 type ComparisonDump struct {
-	Fixture   string         `json:"fixture"`
-	Timestamp string         `json:"timestamp"`
+	Fixture   string          `json:"fixture"`
+	Timestamp string          `json:"timestamp"`
 	Baseline  *QualityMetrics `json:"baseline"`
 	Improved  *QualityMetrics `json:"improved"`
 	Diff      struct {
-		TypeCountDelta         int     `json:"type_count_delta"`
-		TypesWithPropertiesDelta int   `json:"types_with_properties_delta"`
-		AvgPropsDelta          float64 `json:"avg_props_delta"`
-		TokensInputDelta       int     `json:"tokens_input_delta"`
-		WallMsDelta            int64   `json:"wall_ms_delta"`
+		TypeCountDelta           int     `json:"type_count_delta"`
+		TypesWithPropertiesDelta int     `json:"types_with_properties_delta"`
+		AvgPropsDelta            float64 `json:"avg_props_delta"`
+		TokensInputDelta         int     `json:"tokens_input_delta"`
+		WallMsDelta              int64   `json:"wall_ms_delta"`
 	} `json:"diff"`
 }
 
@@ -341,11 +341,11 @@ func (s *RememberExperimentsTestSuite) measureRun(fixture, schemaPolicy string) 
 	dumpSSE(s.T(), rec)
 
 	m := &QualityMetrics{
-		RunID:        runIDFromDone(rec),
-		ProjectID:    s.projectID,
-		WallMillis:   wall,
+		RunID:         runIDFromDone(rec),
+		ProjectID:     s.projectID,
+		WallMillis:    wall,
 		ToolsUsedList: toolsUsed(rec),
-		SchemaID:     schemaIDFromFinalizeSSE(rec),
+		SchemaID:      schemaIDFromFinalizeSSE(rec),
 	}
 
 	for _, t := range m.ToolsUsedList {
@@ -695,9 +695,9 @@ func friendsTranscript(episodeIdx, maxLines int) (string, error) {
 		Episodes []struct {
 			Scenes []struct {
 				Utterances []struct {
-					Speakers            []string `json:"speakers"`
-					Transcript          string   `json:"transcript"`
-					TranscriptWithNote  string   `json:"transcript_with_note"`
+					Speakers           []string `json:"speakers"`
+					Transcript         string   `json:"transcript"`
+					TranscriptWithNote string   `json:"transcript_with_note"`
 				} `json:"utterances"`
 			} `json:"scenes"`
 		} `json:"episodes"`
@@ -773,7 +773,9 @@ func friendsEpisodeInfoText(count int) (string, error) {
 
 	// Validate we have enough — raw JSON parse just to check episode count
 	var check struct {
-		Episodes []struct{ EpisodeID string `json:"episode_id"` } `json:"episodes"`
+		Episodes []struct {
+			EpisodeID string `json:"episode_id"`
+		} `json:"episodes"`
 	}
 	_ = json.Unmarshal(raw, &check) // ignore parse error; episodes slice already populated
 

@@ -218,9 +218,9 @@ type RelayChangeCallback func(projectID, instanceID string, isRegister bool)
 
 // Service manages all active relay sessions, keyed by (projectID, instanceID).
 type Service struct {
-	log              *slog.Logger
-	mu               sync.RWMutex
-	sessions         map[string]*Session // key: projectID+"/"+instanceID
+	log               *slog.Logger
+	mu                sync.RWMutex
+	sessions          map[string]*Session // key: projectID+"/"+instanceID
 	onChangeCallbacks []RelayChangeCallback
 }
 

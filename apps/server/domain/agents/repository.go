@@ -3314,7 +3314,6 @@ func (r *Repository) GetProjectInfo(ctx context.Context, projectID string) (stri
 	return *info, nil
 }
 
-
 // GetRunStatsTopErrors returns the most frequent error messages within the window.
 func (r *Repository) GetRunStatsTopErrors(ctx context.Context, projectID string, agentID *string, since, until time.Time, limit int) ([]RunStatsErrorRow, error) {
 	agentFilter := ""

@@ -78,18 +78,18 @@ type ExtractionSchemas struct {
 
 // ObjectExtractionWorker processes object extraction jobs.
 type ObjectExtractionWorker struct {
-	jobsService         *ObjectExtractionJobsService
-	graphService        *graph.Service
-	branchService       *branches.Service
-	docService          *documents.Service
-	schemaProvider      SchemaProvider
-	modelFactory        *adk.ModelFactory
-	classifier          *DocumentClassifier
-	limitResolver       adk.ModelLimitResolver // optional; nil → no truncation
+	jobsService           *ObjectExtractionJobsService
+	graphService          *graph.Service
+	branchService         *branches.Service
+	docService            *documents.Service
+	schemaProvider        SchemaProvider
+	modelFactory          *adk.ModelFactory
+	classifier            *DocumentClassifier
+	limitResolver         adk.ModelLimitResolver // optional; nil → no truncation
 	pipelineInputModifier PipelineInputModifier  // optional; nil → no modification
-	config              *ObjectExtractionWorkerConfig
-	log                 *slog.Logger
-	scaler              *syshealth.ConcurrencyScaler
+	config                *ObjectExtractionWorkerConfig
+	log                   *slog.Logger
+	scaler                *syshealth.ConcurrencyScaler
 
 	stopCh chan struct{}
 	wg     sync.WaitGroup

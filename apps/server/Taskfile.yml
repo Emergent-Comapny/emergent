@@ -52,6 +52,18 @@ tasks:
     env:
       CGO_ENABLED: "1"
 
+  local:start:
+    desc: Start server for e2e tests (port 3002, stops Docker container first)
+    cmds:
+      - docker stop test-emergent-server 2>/dev/null; true
+      - task: build
+      - sh scripts/start-server-local.sh
+
+  local:stop:
+    desc: Stop local test server
+    cmds:
+      - task: stop
+
   lint:
     desc: Run linter
     cmds:
