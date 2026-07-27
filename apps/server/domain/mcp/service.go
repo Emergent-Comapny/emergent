@@ -4982,8 +4982,8 @@ func (s *Service) executeManageNotes(ctx context.Context, projectID string, args
 	case "list":
 		// Query Note entities with optional filters
 		queryArgs := map[string]any{
-			"type":  "Note",
-			"limit": 20.0,
+			"type_name": "Note",
+			"limit":     20.0,
 		}
 		if l, ok := args["limit"].(float64); ok && l > 0 {
 			if l > 100 {
