@@ -4838,7 +4838,7 @@ func (s *Service) executeSaveNote(ctx context.Context, projectID string, args ma
 		return nil, fmt.Errorf("category is required")
 	}
 
-	validCategories := map[string]bool{"preference": true, "pattern": true, "correction": true, "fact": true, "instruction": true, "convention": true}
+	validCategories := map[string]bool{"preference": true, "pattern": true, "correction": true, "fact": true, "instruction": true, "convention": true, "feature": true}
 	if !validCategories[category] {
 		return nil, fmt.Errorf("invalid category: %s (must be preference, pattern, correction, fact, instruction, convention)", category)
 	}
