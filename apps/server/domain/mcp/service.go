@@ -4832,7 +4832,49 @@ func (s *Service) executeSaveNote(ctx context.Context, projectID string, args ma
 		confidence = 0.7
 	}
 
+	// Check for existing similar notes (dedup via hybrid search)
+	dedupArgs := map[string]any{
+		"query": content,
+		"types": []string{"Note"},
+		"limit": float64(1),
+	}
+	if dedupResult, err := s.executeHybridSearch(ctx, projectID, dedupArgs); err == nil {
+		var searchResult map[string]any
+		if len(dedupResult.Content) > 0 {
+			if json.Unmarshal([]byte(dedupResult.Content[0].Text), &searchResult) == nil {
+				if data, ok := searchResult["data"].([]any); ok && len(data) > 0 {
+					item, _ := data[0].(map[string]any)
+					obj, _ := item["object"].(map[string]any)
+					// Only dedup if matched object is a Note
+					objType, _ := obj["type"].(string)
+					if objType != "Note" {
+						goto createNew
+					}
+					existingID, _ := obj["id"].(string)
+					if existingID != "" {
+						// Merge: take max confidence, update content
+						oldConf := 0.0
+						if props, ok := obj["properties"].(map[string]any); ok {
+							if c, ok := props["confidence"].(float64); ok { oldConf = c }
+						}
+						mergedConf := confidence
+						if oldConf > mergedConf { mergedConf = oldConf }
+						updateArgs := map[string]any{
+							"entity_id": existingID,
+							"properties": map[string]any{
+								"content":    content,
+								"confidence": mergedConf,
+							},
+						}
+						return s.executeUpdateEntity(ctx, projectID, updateArgs)
+					}
+				}
+			}
+		}
+	}
+
 	// Create Note entity via batch create with inline relationships
+createNew:
 	props := map[string]any{
 		"content":      content,
 		"category":     category,
@@ -4972,6 +5014,28 @@ func (s *Service) executeRecallNotes(ctx context.Context, projectID string, args
 	results, _ := searchResult["data"].([]any)
 	if len(results) == 0 {
 		return &ToolResult{Content: []ContentBlock{{Type: "text", Text: "No relevant notes found."}}}, nil
+	}
+
+	// Bump use_count and last_used for each recalled note
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, r := range results {
+		item, _ := r.(map[string]any)
+		obj, _ := item["object"].(map[string]any)
+		if id, ok := obj["id"].(string); ok && id != "" {
+			oldCount := 0.0
+			if props, ok := obj["properties"].(map[string]any); ok {
+				if uc, ok := props["use_count"].(float64); ok { oldCount = uc }
+			}
+			updateArgs := map[string]any{
+				"entity_id": id,
+				"properties": map[string]any{
+					"use_count": oldCount + 1,
+					"last_used": now,
+				},
+			}
+			// Non-fatal — don't break recall if update fails
+			s.executeUpdateEntity(ctx, projectID, updateArgs)
+		}
 	}
 
 	var lines []string
