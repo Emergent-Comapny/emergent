@@ -5201,6 +5201,19 @@ func (s *Service) executeProjectBriefing(ctx context.Context, projectID string, 
 	var sections []string
 	sections = append(sections, fmt.Sprintf("## Project Briefing: %s\n", query))
 
+	// Fetch project info for static context
+	if projResult, err := s.executeGetProjectInfo(ctx, projectID); err == nil && len(projResult.Content) > 0 {
+		projText := projResult.Content[0].Text
+		if projText != "" && projText != "No project info has been configured for this project." {
+			// Truncate long project info to first 3 lines
+			lines := strings.Split(projText, "\n")
+			if len(lines) > 3 {
+				projText = strings.Join(lines[:3], "\n") + "\n..."
+			}
+			sections = append(sections, "### Project Info", projText)
+		}
+	}
+
 	// Helper to parse and format note results from search
 	formatNotes := func(result *ToolResult, header string) ([]string, bool) {
 		if result == nil || len(result.Content) == 0 { return nil, false }
