@@ -1,0 +1,262 @@
+name: project-knowledge
+version: 1.0.0
+description: >
+  Project-level knowledge graph for agent memory. Captures coding patterns,
+  architectural decisions, file responsibilities, module boundaries, and
+  external dependencies discovered during agent sessions. Designed to be
+  populated by the remember pipeline and queried via graph traversal.
+
+objectTypeSchemas:
+
+  - name: CodingPattern
+    label: Coding Pattern
+    description: >
+      A recurring pattern discovered in the codebase — architectural style,
+      data access pattern, testing convention, or structural rule. Patterns
+      are discovered by agents and validated over time through repeated
+      observation. Follows the Codebase schema's Pattern type design but
+      scoped to agent-observable patterns.
+    properties:
+      name:
+        type: string
+        required: true
+        description: "Short name for the pattern, e.g. 'fx-dependency-injection'"
+      kind:
+        type: string
+        required: true
+        enum:
+          - architectural
+          - data-access
+          - testing
+          - error-handling
+          - routing
+          - configuration
+          - naming
+          - deployment
+        description: "Category of the pattern"
+      scope:
+        type: string
+        enum:
+          - project-wide
+          - module
+          - package
+          - file
+        default: project-wide
+        description: "How broadly the pattern applies"
+      description:
+        type: string
+        description: "Detailed description with examples of usage"
+      source_files:
+        type: array
+        items: string
+        description: "File paths that exemplify this pattern"
+    labels:
+      - pattern
+      - "{kind}"
+    ui:
+      icon: "🔄"
+      color: "#059669"
+
+  - name: SourceFile
+    label: Source File
+    description: >
+      A source file with a known role in the project. Unlike the full Codebase
+      schema's SourceFile (which tracks every file), this captures only files
+      that agents have identified as significant — entry points, key modules,
+      config files, or files with important patterns.
+    properties:
+      path:
+        type: string
+        required: true
+        description: "Relative path from project root"
+      language:
+        type: string
+        description: "Programming language"
+      role:
+        type: string
+        enum:
+          - entry-point
+          - configuration
+          - core-logic
+          - middleware
+          - handler
+          - service
+          - store
+          - model
+          - utility
+          - test
+        description: "Role this file plays in the project"
+      importance:
+        type: number
+        minimum: 1
+        maximum: 5
+        default: 3
+        description: "How critical this file is (1=auxiliary, 5=critical)"
+    labels:
+      - file
+      - "{role}"
+    ui:
+      icon: "📄"
+      color: "#2563EB"
+
+  - name: Module
+    label: Module
+    description: >
+      A logical grouping of related source files. Maps to Go packages,
+      TypeScript modules, or domain directories. Agents discover module
+      boundaries by observing import patterns and directory structure.
+    properties:
+      name:
+        type: string
+        required: true
+        description: "Module name, e.g. 'auth', 'database', 'api'"
+      path:
+        type: string
+        description: "Filesystem path to the module root"
+      purpose:
+        type: string
+        description: "What this module is responsible for"
+    labels:
+      - module
+    ui:
+      icon: "📦"
+      color: "#7C3AED"
+
+  - name: ArchitecturalDecision
+    label: Architectural Decision
+    description: >
+      A significant architectural decision captured during development.
+      Records the context, decision, and consequences so future agents
+      understand why the system is structured this way. Inspired by ADR
+      (Architecture Decision Records) but scoped to agent observations.
+    properties:
+      title:
+        type: string
+        required: true
+        description: "Short title of the decision"
+      context:
+        type: string
+        description: "What was the situation that called for this decision"
+      decision:
+        type: string
+        required: true
+        description: "What was decided and why"
+      consequences:
+        type: string
+        description: "What resulted from this decision — positive and negative"
+      status:
+        type: string
+        enum:
+          - proposed
+          - accepted
+          - deprecated
+          - superseded
+        default: accepted
+        description: "Current status of this decision"
+    labels:
+      - decision
+      - "{status}"
+    ui:
+      icon: "📋"
+      color: "#DC2626"
+
+  - name: ExternalDependency
+    label: External Dependency
+    description: >
+      A library, framework, or service that the project depends on.
+    properties:
+      name:
+        type: string
+        required: true
+        description: "Dependency name, e.g. 'fx', 'bun', 'postgresql'"
+      kind:
+        type: string
+        enum:
+          - library
+          - framework
+          - database
+          - service
+          - tool
+        description: "Type of dependency"
+      version:
+        type: string
+        description: "Version constraint or tag"
+      registry:
+        type: string
+        description: "Where to find it (npm, go.mod, docker hub)"
+    labels:
+      - dependency
+      - "{kind}"
+    ui:
+      icon: "📎"
+      color: "#D97706"
+
+relationshipTypeSchemas:
+
+  - name: follows_pattern
+    label: Follows Pattern
+    description: >
+      A module or source file follows a specific coding pattern.
+    sourceType: Module
+    targetType: CodingPattern
+    properties:
+      confidence:
+        type: number
+        minimum: 0
+        maximum: 1
+        description: "How confident the agent is about this pattern match"
+
+  - name: exemplifies
+    label: Exemplifies
+    description: >
+      A source file is a clear example of this pattern. Stronger than follows —
+      this file is the canonical example.
+    sourceType: SourceFile
+    targetType: CodingPattern
+
+  - name: belongs_to_module
+    label: Belongs To Module
+    description: >
+      A source file is part of a module.
+    sourceType: SourceFile
+    targetType: Module
+
+  - name: contains
+    label: Contains
+    description: >
+      A module contains other sub-modules.
+    sourceType: Module
+    targetType: Module
+
+  - name: depends_on
+    label: Depends On
+    description: >
+      A module or service depends on an external dependency.
+    sourceType: Module
+    targetType: ExternalDependency
+    properties:
+      import_path:
+        type: string
+        description: "Import path used in code"
+
+  - name: relates_to
+    label: Relates To
+    description: >
+      An architectural decision is related to a pattern or module.
+    sourceType: ArchitecturalDecision
+    targetType: CodingPattern
+
+  - name: documents
+    label: Documents
+    description: >
+      A source file or module is documented by an architectural decision.
+    sourceType: ArchitecturalDecision
+    targetType: Module
+
+  - name: annotates
+    label: Annotates
+    description: >
+      A Note (from agent-notes schema) annotates any project-knowledge entity.
+      Links the lightweight observation layer to the heavyweight structure.
+    sourceType: Note
+    targetType: "*"

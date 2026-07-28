@@ -1,0 +1,7 @@
+name: project-knowledge
+description: >
+  Heavyweight project knowledge graph for agent memory. Captures coding
+  patterns, architectural decisions, file responsibilities, module boundaries,
+  and dependencies discovered during agent sessions. Populated by the
+  remember pipeline. Designed with graph traversal in mind — queries expand
+  via relationships to build rich context.
