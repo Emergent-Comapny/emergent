@@ -1307,8 +1307,27 @@ func (s *Service) GetToolDefinitions() []ToolDefinition {
 					Type:        "integer",
 					Description: "Maximum number of notes to return. Default 10, max 50.",
 				},
+				"mode": {
+					Type:        "string",
+					Description: "Output mode: summary (IDs + categories + 60-char preview, token-efficient) or full (complete content). Default: full",
+				},
 			},
 			Required: []string{"query"},
+		},
+	})
+	tools = append(tools, ToolDefinition{
+		Name:          "get_note",
+		Description:   "Get full details of a single note by ID. Use after recall_notes(mode=summary) to fetch full content of specific notes.",
+		RequiredScope: "graph:read",
+		InputSchema: InputSchema{
+			Type: "object",
+			Properties: map[string]PropertySchema{
+				"note_id": {
+					Type:        "string",
+					Description: "UUID of the note to retrieve.",
+				},
+			},
+			Required: []string{"note_id"},
 		},
 	})
 	tools = append(tools, ToolDefinition{
@@ -1461,6 +1480,7 @@ var toolRequiredScope = map[string]string{
 	// Agent Notes
 	"save_note":    "graph:write",
 	"recall_notes": "graph:read",
+	"get_note":     "graph:read",
 	"manage_notes": "graph:write",
 }
 
@@ -1875,6 +1895,8 @@ func (s *Service) ExecuteTool(ctx context.Context, projectID string, toolName st
 		return s.executeSaveNote(ctx, projectID, args)
 	case "recall_notes":
 		return s.executeRecallNotes(ctx, projectID, args)
+	case "get_note":
+		return s.executeGetNote(ctx, projectID, args)
 	case "manage_notes":
 		return s.executeManageNotes(ctx, projectID, args)
 
@@ -4908,6 +4930,7 @@ func (s *Service) executeRecallNotes(ctx context.Context, projectID string, args
 	}
 
 	category, _ := args["category"].(string)
+	mode, _ := args["mode"].(string)
 
 	// Use search-hybrid filtered to Note type
 	searchArgs := map[string]any{
@@ -4962,13 +4985,36 @@ func (s *Service) executeRecallNotes(ctx context.Context, projectID string, args
 		if cat == "" {
 			cat = "unknown"
 		}
-		lines = append(lines, fmt.Sprintf("%d. [%s] %s (confidence: %.1f)", i+1, cat, truncateStr(content, 200), conf))
+		if mode == "summary" {
+			noteID, _ := obj["id"].(string)
+			if noteID == "" {
+				noteID = fmt.Sprintf("result-%d", i+1)
+			}
+			lines = append(lines, fmt.Sprintf("%s: [%s] %s (confidence: %.1f)", noteID, cat, truncateStr(content, 60), conf))
+		} else {
+			lines = append(lines, fmt.Sprintf("%d. [%s] %s (confidence: %.1f)", i+1, cat, truncateStr(content, 200), conf))
+		}
 	}
 
 	return &ToolResult{Content: []ContentBlock{{
 		Type: "text",
 		Text: fmt.Sprintf("Found %d notes:\n%s", len(results), strings.Join(lines, "\n")),
 	}}}, nil
+}
+
+// executeGetNote fetches a single note by ID.
+func (s *Service) executeGetNote(ctx context.Context, projectID string, args map[string]any) (*ToolResult, error) {
+	noteID, _ := args["note_id"].(string)
+	if noteID == "" {
+		return nil, fmt.Errorf("note_id is required")
+	}
+
+	// Use entity-query with ids[] to fetch specific entity
+	queryArgs := map[string]any{
+		"ids":       []string{noteID},
+		"type_name": "Note",
+	}
+	return s.executeQueryEntities(ctx, projectID, queryArgs)
 }
 
 // executeManageNotes lists, updates, deletes, or promotes notes.
