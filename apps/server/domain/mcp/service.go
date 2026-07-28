@@ -1231,6 +1231,25 @@ func (s *Service) GetToolDefinitions() []ToolDefinition {
 		},
 	})
 	tools = append(tools, ToolDefinition{
+		Name:        "project-briefing",
+		Description: "Get a formatted project briefing for a given task. Returns core notes, relevant past notes from semantic search, and discovered patterns and conventions — all in one call. Use at the start of a session to load all relevant context at once. No LLM calls — fast data retrieval only.",
+		RequiredScope: "graph:read",
+		InputSchema: InputSchema{
+			Type: "object",
+			Properties: map[string]PropertySchema{
+				"query": {
+					Type:        "string",
+					Description: "What you are working on. Used to find relevant context. E.g. 'adding dark mode to auth module'",
+				},
+				"limit": {
+					Type:        "number",
+					Description: "Max results per section. Default: 5",
+				},
+			},
+			Required: []string{"query"},
+		},
+	})
+	tools = append(tools, ToolDefinition{
 		Name:        "journal-add-note",
 		Description: "Add a markdown note to the project journal. Notes can be standalone or attached to a specific journal entry. Use to record observations, decisions, or context about graph changes.",
 		InputSchema: InputSchema{
@@ -1474,6 +1493,7 @@ var toolRequiredScope = map[string]string{
 	"search-similar":  "search",
 	// Session
 	"session-get-messages": "graph:read",
+	"project-briefing":   "graph:read",
 	// Journal (static tools; journal-list and journal-add-note are also appended below)
 	"journal-list":     "journal:read",
 	"journal-add-note": "journal:write",
@@ -1885,6 +1905,8 @@ func (s *Service) ExecuteTool(ctx context.Context, projectID string, toolName st
 		return s.executeQueryKnowledge(ctx, projectID, args)
 
 	// Journal tools
+	case "project-briefing":
+		return s.executeProjectBriefing(ctx, projectID, args)
 	case "journal-list":
 		return s.executeJournalList(ctx, projectID, args)
 	case "journal-add-note":
@@ -5161,4 +5183,96 @@ func truncateStr(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// executeProjectBriefing returns a formatted project briefing with core notes,
+// relevant notes, patterns, and conventions — all in one call.
+func (s *Service) executeProjectBriefing(ctx context.Context, projectID string, args map[string]any) (*ToolResult, error) {
+	query, _ := args["query"].(string)
+	if query == "" {
+		return nil, fmt.Errorf("query is required")
+	}
+	limit := 5
+	if l, ok := args["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+		if limit > 20 { limit = 20 }
+	}
+
+	var sections []string
+	sections = append(sections, fmt.Sprintf("## Project Briefing: %s\n", query))
+
+	// Helper to parse and format note results from search
+	formatNotes := func(result *ToolResult, header string) ([]string, bool) {
+		if result == nil || len(result.Content) == 0 { return nil, false }
+		var sr map[string]any
+		if json.Unmarshal([]byte(result.Content[0].Text), &sr) != nil { return nil, false }
+		data, _ := sr["data"].([]any)
+		if len(data) == 0 { return nil, false }
+		var lines []string
+		for _, r := range data {
+			item, _ := r.(map[string]any)
+			obj, _ := item["object"].(map[string]any)
+			props, _ := obj["properties"].(map[string]any)
+			content, _ := props["content"].(string)
+			cat, _ := props["category"].(string)
+			conf, _ := props["confidence"].(float64)
+			if content == "" { continue }
+			lines = append(lines, fmt.Sprintf("- [%s] %s (%.1f)", cat, content, conf))
+		}
+		if len(lines) == 0 { return nil, false }
+		return append([]string{header}, lines...), true
+	}
+
+	flimit := float64(limit)
+
+	// 1. Core notes (label-based, no embeddings needed)
+	if coreResult, err := s.executeHybridSearch(ctx, projectID, map[string]any{
+		"query": "core",
+		"types": []any{"Note"},
+		"labels": []any{"core"},
+		"limit": flimit,
+	}); err == nil {
+		if coreLines, ok := formatNotes(coreResult, "\n### Core Notes"); ok {
+			sections = append(sections, coreLines...)
+		}
+	}
+
+	// 2. Relevant notes (semantic search on query)
+	if recallResult, err := s.executeHybridSearch(ctx, projectID, map[string]any{
+		"query": query,
+		"types": []any{"Note"},
+		"limit": flimit,
+	}); err == nil {
+		if recallLines, ok := formatNotes(recallResult, "\n### Relevant Notes"); ok {
+			sections = append(sections, recallLines...)
+		}
+	}
+
+	// 3. Patterns
+	if patResult, err := s.executeHybridSearch(ctx, projectID, map[string]any{
+		"query": query,
+		"types": []any{"Note"},
+		"labels": []any{"pattern"},
+		"limit": 3.0,
+	}); err == nil {
+		if patLines, ok := formatNotes(patResult, "\n### Patterns"); ok {
+			sections = append(sections, patLines...)
+		}
+	}
+
+	// 4. Conventions
+	if convResult, err := s.executeHybridSearch(ctx, projectID, map[string]any{
+		"query": query,
+		"types": []any{"Note"},
+		"labels": []any{"convention"},
+		"limit": 3.0,
+	}); err == nil {
+		if convLines, ok := formatNotes(convResult, "\n### Conventions"); ok {
+			sections = append(sections, convLines...)
+		}
+	}
+
+	return &ToolResult{Content: []ContentBlock{{
+		Type: "text", Text: strings.Join(sections, "\n"),
+	}}}, nil
 }
