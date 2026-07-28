@@ -1,0 +1,6 @@
+name: feature-dev
+description: >
+  Lightweight feature development tracking. 3 types + 4 relationships.
+  Feature groups requirements and decisions. Graph-traversable — query
+  "what decisions were made for this feature" or "what features touched
+  this file" via relationship traversal.
