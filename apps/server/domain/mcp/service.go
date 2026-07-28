@@ -4835,7 +4835,7 @@ func (s *Service) executeSaveNote(ctx context.Context, projectID string, args ma
 	// Check for existing similar notes (dedup via hybrid search)
 	dedupArgs := map[string]any{
 		"query": content,
-		"types": []string{"Note"},
+		"types": []any{"Note"},
 		"limit": float64(1),
 	}
 	if dedupResult, err := s.executeHybridSearch(ctx, projectID, dedupArgs); err == nil {
