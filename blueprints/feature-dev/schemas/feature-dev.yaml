@@ -169,3 +169,12 @@ relationshipTypeSchemas:
       connected technical choices.
     sourceType: Decision
     targetType: Decision
+
+  - name: derives_from
+    label: Derives From
+    description: >
+      A Requirement derives from a user statement (captured as a Note
+      with category=feature or category=requirement). Links the
+      requirement back to the verbatim user input.
+    sourceType: Requirement
+    targetType: Note
