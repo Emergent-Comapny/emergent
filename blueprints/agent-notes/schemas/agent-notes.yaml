@@ -34,7 +34,6 @@ objectTypeSchemas:
           - fact
           - instruction
           - convention
-          - feature
         description: "Classification of the observation type"
       source:
         type: string
