@@ -147,7 +147,6 @@ services:
       EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-768}
 
       DB_AUTOINIT: 'true'
-      SCOPES_DISABLED: 'true'
       LLM_ENCRYPTION_KEY: ${LLM_ENCRYPTION_KEY:-}
 
       # Workspace configuration

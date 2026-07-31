@@ -283,6 +283,19 @@ func (s *ModelCatalogService) TestGenerate(ctx context.Context, provider Provide
 		model = s.pickCheapTestModel(models)
 	}
 
+	// If the resolved model is actually an embedding model, test it via the
+	// embeddings endpoint instead of generateContent. Providers like Vertex AI
+	// reject generateContent for embedding models with a misleading error
+	// ("text-embedding-004 ... is not supported for generateContent"), causing
+	// false failures when an embedding model ends up as the tested model.
+	if s.modelIsEmbedding(ctx, provider, model) {
+		embModel, embErr := s.embedContentForModel(ctx, provider, cred, model)
+		if embErr != nil {
+			return "", "", fmt.Errorf("embedding model test failed: %w", embErr)
+		}
+		return embModel, "(ok)", nil
+	}
+
 	// OpenAI-compatible and DeepSeek: use direct HTTP call instead of genai client.
 	if provider == ProviderOpenAI || provider == ProviderDeepSeek {
 		if cred.BaseURL == "" {
@@ -377,7 +390,14 @@ func (s *ModelCatalogService) TestEmbed(ctx context.Context, provider ProviderTy
 		}
 		model = models[0].ModelName
 	}
+	return s.embedContentForModel(ctx, provider, cred, model)
+}
 
+// embedContentForModel sends a single embed call for a specific model name to
+// verify credentials and model work end-to-end. It is shared by TestEmbed and
+// by TestGenerate when the target model turns out to be an embedding model.
+// Returns the model name used.
+func (s *ModelCatalogService) embedContentForModel(ctx context.Context, provider ProviderType, cred *ResolvedCredential, model string) (string, error) {
 	switch provider {
 	case ProviderVertexAI:
 		if cred.GCPProject == "" || cred.Location == "" {
@@ -434,6 +454,34 @@ func (s *ModelCatalogService) TestEmbed(ctx context.Context, provider ProviderTy
 	}
 
 	return model, nil
+}
+
+// modelIsEmbedding reports whether the given model name is an embedding model.
+// It consults the synced catalog (the authoritative classification) and falls
+// back to a name-based heuristic when the catalog lookup fails or is empty
+// (e.g. no sync has happened yet).
+func (s *ModelCatalogService) modelIsEmbedding(ctx context.Context, provider ProviderType, model string) bool {
+	if nameLooksEmbedding(model) {
+		return true
+	}
+	embType := ModelTypeEmbedding
+	models, err := s.repo.ListSupportedModels(ctx, provider, &embType)
+	if err != nil {
+		return false
+	}
+	for _, m := range models {
+		if m.ModelName == model {
+			return true
+		}
+	}
+	return false
+}
+
+// nameLooksEmbedding applies a cheap name-based heuristic for detecting
+// embedding models. Covers the common Google/Vertex and OpenAI families.
+func nameLooksEmbedding(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.Contains(lower, "embedding") || strings.Contains(lower, "text-embed")
 }
 
 // pickCheapTestModel selects a cheap, fast model from the catalog for testing

@@ -277,6 +277,19 @@ func (s *CredentialService) UpsertProjectConfig(ctx context.Context, projectID s
 		return nil, err
 	}
 
+	// When the caller omits credential fields (e.g. only updating models or
+	// baseURL), reuse the previously stored credential instead of requiring
+	// the API key / service account on every upsert.
+	if s.needsStoredCredential(provider, req) {
+		existing, err := s.repo.GetProjectProviderConfig(ctx, projectID, provider)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get existing provider config: %w", err)
+		}
+		if err := s.reuseStoredCredential(provider, existing, &req); err != nil {
+			return nil, err
+		}
+	}
+
 	plaintext, err := s.extractPlaintext(provider, req)
 	if err != nil {
 		return nil, err
@@ -431,6 +444,63 @@ func (s *CredentialService) DeleteProjectConfig(ctx context.Context, projectID s
 }
 
 // --- helpers ---
+
+// needsStoredCredential reports whether the request is missing credential
+// fields that must be filled from the previously stored config.
+func (s *CredentialService) needsStoredCredential(provider ProviderType, req UpsertProviderConfigRequest) bool {
+	switch provider {
+	case ProviderGoogleAI, ProviderOpenAI, ProviderDeepSeek:
+		return req.APIKey == ""
+	case ProviderVertexAI:
+		return req.ServiceAccountJSON == "" || req.GCPProject == "" || req.Location == ""
+	default:
+		return false
+	}
+}
+
+// reuseStoredCredential fills credential fields omitted by the caller from the
+// previously stored config, so callers can update models or baseURL without
+// resending the API key or service account on every request.
+func (s *CredentialService) reuseStoredCredential(provider ProviderType, existing *ProjectProviderConfig, req *UpsertProviderConfigRequest) error {
+	if existing == nil || len(existing.EncryptedCredential) == 0 {
+		return nil // nothing stored to reuse — extractPlaintext reports what's missing
+	}
+	if s.encryptor == nil {
+		return fmt.Errorf("credential encryption not configured (LLM_ENCRYPTION_KEY missing)")
+	}
+
+	needsPlaintext := false
+	switch provider {
+	case ProviderGoogleAI, ProviderOpenAI, ProviderDeepSeek:
+		needsPlaintext = req.APIKey == ""
+	case ProviderVertexAI:
+		needsPlaintext = req.ServiceAccountJSON == ""
+	}
+
+	if needsPlaintext {
+		plaintext, err := s.encryptor.Decrypt(existing.EncryptedCredential, existing.EncryptionNonce)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt existing credential: %w", err)
+		}
+		switch provider {
+		case ProviderGoogleAI, ProviderOpenAI, ProviderDeepSeek:
+			req.APIKey = string(plaintext)
+		case ProviderVertexAI:
+			req.ServiceAccountJSON = string(plaintext)
+		}
+	}
+
+	// Vertex GCPProject/Location are stored as plaintext columns — reuse when omitted.
+	if provider == ProviderVertexAI {
+		if req.GCPProject == "" {
+			req.GCPProject = existing.GCPProject
+		}
+		if req.Location == "" {
+			req.Location = existing.Location
+		}
+	}
+	return nil
+}
 
 // extractPlaintext returns the credential bytes to encrypt from the request.
 func (s *CredentialService) extractPlaintext(provider ProviderType, req UpsertProviderConfigRequest) ([]byte, error) {

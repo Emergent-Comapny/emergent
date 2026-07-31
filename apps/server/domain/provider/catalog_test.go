@@ -85,6 +85,27 @@ func TestClassifyModel(t *testing.T) {
 	}
 }
 
+func TestNameLooksEmbedding(t *testing.T) {
+	tests := []struct {
+		name     string
+		expected bool
+	}{
+		{"text-embedding-004", true},
+		{"publishers/google/models/text-embedding-005", true},
+		{"gemini-embedding-001", true},
+		{"gemini-embedding-2-preview", true},
+		{"text-embed-3-large", true},
+		{"gemini-2.0-flash", false},
+		{"deepseek-v4-flash", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := nameLooksEmbedding(tt.name); got != tt.expected {
+			t.Errorf("nameLooksEmbedding(%q) = %v, want %v", tt.name, got, tt.expected)
+		}
+	}
+}
+
 func TestNormalizeModelName(t *testing.T) {
 	tests := []struct {
 		input    string

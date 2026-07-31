@@ -213,9 +213,6 @@ services:
       # Features
       DB_AUTOINIT: 'true'
 
-      # Disable features that require Zitadel
-      SCOPES_DISABLED: 'true'
-
       # Agent Sandboxes (disabled by default)
       ENABLE_AGENT_SANDBOXES: ${ENABLE_AGENT_SANDBOXES:-false}
       WORKSPACE_DEFAULT_PROVIDER: ${WORKSPACE_DEFAULT_PROVIDER:-gvisor}

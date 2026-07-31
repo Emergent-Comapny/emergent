@@ -60,11 +60,6 @@ services:
       ZITADEL_MAIN_ORG_ID: ${ZITADEL_MAIN_ORG_ID}
       ZITADEL_PROJECT_ID: ${ZITADEL_PROJECT_ID}
 
-      # Auth (JWT validation - validates tokens from frontend)
-      AUTH_ISSUER: ${ZITADEL_ISSUER}
-      AUTH_AUDIENCE: ${ZITADEL_FRONTEND_CLIENT_ID}
-      AUTH_JWKS_URI: ${ZITADEL_ISSUER}/oauth/v2/keys
-
       # Server
       PORT: 3002
       GO_ENV: production
@@ -72,7 +67,7 @@ services:
 
       # Google AI
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
-      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-1536}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-768}
 
       # Features
       DB_AUTOINIT: ${DB_AUTOINIT:-true}
