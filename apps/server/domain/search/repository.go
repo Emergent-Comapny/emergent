@@ -450,11 +450,11 @@ func (r *Repository) SearchRelationships(ctx context.Context, params Relationshi
 				LOWER(REPLACE(r.type, '_', ' ')) || ' ' || 
 				COALESCE(dst.key, dst.id::text) AS triplet_text,
 			(1 - (r.embedding <=> ?::vector)) AS score,
-			src.key AS src_key,
-			src.type AS src_type,
+			COALESCE(src.key, '') AS src_key,
+			COALESCE(src.type, '') AS src_type,
 			src.properties AS src_properties,
-			dst.key AS dst_key,
-			dst.type AS dst_type,
+			COALESCE(dst.key, '') AS dst_key,
+			COALESCE(dst.type, '') AS dst_type,
 			dst.properties AS dst_properties
 		FROM kb.graph_relationships r
 		JOIN kb.graph_objects src ON src.id = r.src_id

@@ -166,7 +166,7 @@ Use --type to filter by model type (embedding or generative).
 
 Examples:
   memory provider models
-  memory provider models openai-compatible
+  memory provider models openai
   memory provider models google-vertex
   memory provider models google --type generative
   memory provider models deepseek`,
@@ -554,14 +554,14 @@ var providerTestCmd = &cobra.Command{
 work end-to-end.
 
 Without a provider argument, tests all configured providers.
-Pass a provider name (google, google-vertex, openai-compatible, or deepseek) to test a specific one.
+Pass a provider name (google, google-vertex, openai, or deepseek) to test a specific one.
 
 Use --project to test using the project-level credential hierarchy
 (project override → org) instead of org credentials only.
 
 Examples:
   memory provider test
-  memory provider test openai-compatible
+  memory provider test openai
   memory provider test deepseek
   memory provider test google-vertex
   memory provider test google --project <id>`,
@@ -818,7 +818,7 @@ func init() {
 	configureProjectCmd.Flags().StringVar(&configureProjectKeyFile, "key-file", "", "Path to service account JSON key file (google-vertex)")
 	configureProjectCmd.Flags().StringVar(&configureProjectGCPProject, "gcp-project", "", "GCP project ID (required for google-vertex)")
 	configureProjectCmd.Flags().StringVar(&configureProjectLocation, "location", "", "GCP region, e.g. us-central1 (required for google-vertex)")
-	configureProjectCmd.Flags().StringVar(&configureProjectBaseURL, "base-url", "", "OpenAI-compatible base URL (required for openai-compatible)")
+	configureProjectCmd.Flags().StringVar(&configureProjectBaseURL, "base-url", "", "OpenAI-compatible base URL (required for openai)")
 	configureProjectCmd.Flags().StringVar(&configureProjectGenerativeModel, "generative-model", "", "Generative model to use (auto-selected from catalog if omitted)")
 	configureProjectCmd.Flags().StringVar(&configureProjectEmbeddingModel, "embedding-model", "", "Embedding model to use (auto-selected from catalog if omitted)")
 	configureProjectCmd.Flags().StringVar(&configureProjectID, "project", "", "Project ID (auto-detected from MEMORY_PROJECT_ID)")

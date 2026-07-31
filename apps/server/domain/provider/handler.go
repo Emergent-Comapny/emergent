@@ -69,7 +69,7 @@ func (h *Handler) ListProjectConfigs(c echo.Context) error {
 // SaveProjectConfig stores provider credentials and model selections for a project.
 // @Summary Configure project-level provider
 // @Param projectId path string true "Project ID"
-// @Param provider path string true "Provider name (google or google-vertex)"
+// @Param provider path string true "Provider name (google, google-vertex, openai, or deepseek)"
 // @Param body body UpsertProviderConfigRequest true "Provider config"
 // @Success 200 {object} ProviderConfigResponse
 // @Failure 400 {object} apperror.Error
@@ -477,7 +477,7 @@ type TestProviderResponse struct {
 
 // TestProvider sends a live "hello" generate call to verify provider credentials work end-to-end.
 // @Summary Test a provider with a live generate call
-// @Param provider path string true "Provider name (google or google-vertex)"
+// @Param provider path string true "Provider name (google, google-vertex, openai, or deepseek)"
 // @Param projectId query string false "Project ID for credential resolution"
 // @Param orgId query string false "Org ID for credential resolution"
 // @Success 200 {object} TestProviderResponse
@@ -488,8 +488,9 @@ func (h *Handler) TestProvider(c echo.Context) error {
 	providerParam := c.Param("provider")
 	if providerParam != string(ProviderGoogleAI) &&
 		providerParam != string(ProviderVertexAI) &&
+		providerParam != string(ProviderOpenAI) &&
 		providerParam != string(ProviderDeepSeek) {
-		return apperror.ErrBadRequest.WithMessage("provider must be google, google-vertex, or deepseek")
+		return apperror.ErrBadRequest.WithMessage("provider must be google, google-vertex, openai, or deepseek")
 	}
 	p := ProviderType(providerParam)
 

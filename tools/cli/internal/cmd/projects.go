@@ -173,12 +173,13 @@ var setProjectProviderCmd = &cobra.Command{
 	Short: "Configure the LLM provider for a project",
 	Long: `Configure the LLM provider credentials for a specific project.
 
-Supported providers: google, google-vertex. Prints the provider name, the
-configured generative model, and the embedding model on success. Use flags
-such as --api-key, --embedding-model, and --generative-model to specify
-credentials and model overrides.`,
-	Args: cobra.RangeArgs(1, 2),
-	RunE: runSetProjectProvider,
+Supported providers: google, google-vertex, openai, deepseek. Prints the
+provider name, the configured generative model, and the embedding model on
+success. Use flags such as --api-key, --embedding-model, and
+--generative-model to specify credentials and model overrides.`,
+	Args:      cobra.RangeArgs(1, 2),
+	ValidArgs: []string{"google", "google-vertex", "openai", "deepseek"},
+	RunE:      runSetProjectProvider,
 }
 
 var setProjectInfoCmd = &cobra.Command{
@@ -274,6 +275,7 @@ var (
 	setProviderSAFile     string
 	setProviderGCPProject string
 	setProviderLocation   string
+	setProviderBaseURL    string
 	setProviderEmbedding  string
 	setProviderGenerative string
 	setProjectClearFlag   bool
@@ -888,10 +890,6 @@ func runSetProjectProvider(cmd *cobra.Command, args []string) error {
 		providerName = args[1]
 	}
 
-	if providerName != "google" && providerName != "google-vertex" {
-		return fmt.Errorf("invalid provider %q: must be 'google' or 'google-vertex'", providerName)
-	}
-
 	c, err := getClient(cmd)
 	if err != nil {
 		return err
@@ -912,6 +910,38 @@ func runSetProjectProvider(cmd *cobra.Command, args []string) error {
 		Location:        setProviderLocation,
 		EmbeddingModel:  setProviderEmbedding,
 		GenerativeModel: setProviderGenerative,
+	}
+
+	switch providerName {
+	case provider.ProviderGoogleAI:
+		if setProviderAPIKey == "" {
+			return fmt.Errorf("--api-key is required for google")
+		}
+		req.APIKey = setProviderAPIKey
+
+	case provider.ProviderVertexAI:
+		if setProviderSAFile == "" && (setProviderGCPProject == "" || setProviderLocation == "") {
+			return fmt.Errorf("--sa-file or both --gcp-project and --location are required for google-vertex")
+		}
+		req.GCPProject = setProviderGCPProject
+		req.Location = setProviderLocation
+
+	case provider.ProviderOpenAI:
+		if setProviderAPIKey == "" {
+			return fmt.Errorf("--api-key is required for openai")
+		}
+		req.APIKey = setProviderAPIKey
+		req.BaseURL = setProviderBaseURL // optional
+
+	case provider.ProviderDeepSeek:
+		if setProviderAPIKey == "" {
+			return fmt.Errorf("--api-key is required for deepseek")
+		}
+		req.APIKey = setProviderAPIKey
+		req.BaseURL = setProviderBaseURL // optional
+
+	default:
+		return fmt.Errorf("unsupported provider %q; must be google, google-vertex, openai, or deepseek", providerName)
 	}
 
 	if setProviderSAFile != "" {
@@ -1103,10 +1133,11 @@ func init() {
 
 	setProjectCmd.Flags().BoolVar(&setProjectClearFlag, "clear", false, "Clear the active project from config")
 
-	setProjectProviderCmd.Flags().StringVar(&setProviderAPIKey, "api-key", "", "Google AI API key (for google)")
+	setProjectProviderCmd.Flags().StringVar(&setProviderAPIKey, "api-key", "", "API key for the provider")
 	setProjectProviderCmd.Flags().StringVar(&setProviderSAFile, "sa-file", "", "Path to Vertex AI service account JSON (for google-vertex)")
 	setProjectProviderCmd.Flags().StringVar(&setProviderGCPProject, "gcp-project", "", "GCP project ID (for google-vertex)")
 	setProjectProviderCmd.Flags().StringVar(&setProviderLocation, "location", "", "GCP region (for google-vertex)")
+	setProjectProviderCmd.Flags().StringVar(&setProviderBaseURL, "base-url", "", "OpenAI-compatible base URL (for openai)")
 	setProjectProviderCmd.Flags().StringVar(&setProviderEmbedding, "embedding-model", "", "Override embedding model for this project")
 	setProjectProviderCmd.Flags().StringVar(&setProviderGenerative, "generative-model", "", "Override generative model for this project")
 
