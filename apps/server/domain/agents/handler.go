@@ -490,8 +490,13 @@ func (h *Handler) UpdateAgent(c echo.Context) error {
 		agent.AgentDefinitionID = dto.AgentDefinitionID
 	}
 	// disabledReason is admin-only: only applied if caller has admin:write scope.
+	// An explicit empty string clears the disabled reason.
 	if dto.DisabledReason != nil && user.HasScope("admin:write") {
-		agent.DisabledReason = dto.DisabledReason
+		if *dto.DisabledReason == "" {
+			agent.DisabledReason = nil
+		} else {
+			agent.DisabledReason = dto.DisabledReason
+		}
 	}
 
 	// Validate cron interval if cron schedule is being changed or trigger type is schedule.

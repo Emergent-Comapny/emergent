@@ -130,6 +130,7 @@ type ServiceParams struct {
 	Log          *slog.Logger
 
 	DocumentsSvc       *documents.Service
+	StorageSvc         *storage.Service
 	SkillsRepo         *skills.Repository
 	BranchSvc          *branches.Service
 	ProviderCredSvc    *provider.CredentialService
@@ -160,6 +161,7 @@ func NewService(p ServiceParams) *Service {
 		braveSearchTimeout: timeout,
 		log:                p.Log.With(logger.Scope("mcp.svc")),
 		documentsSvc:       p.DocumentsSvc,
+		storageSvc:         p.StorageSvc,
 		skillsRepo:         p.SkillsRepo,
 		branchSvc:          p.BranchSvc,
 		providerCredSvc:    p.ProviderCredSvc,

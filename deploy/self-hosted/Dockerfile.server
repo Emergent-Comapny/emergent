@@ -41,6 +41,10 @@ RUN go mod download
 # Copy source code (cache invalidation point for source changes)
 COPY apps/server/ ./
 
+# Sync go.mod/go.sum — release tags built via `git archive` can be slightly
+# out of sync, causing `go build` to fail with "updates to go.mod needed"
+RUN go mod tidy
+
 # Generate swagger docs (runs on build platform, not target)
 # Note: apps/server/docs may be a symlink on the host — remove it entirely first
 RUN rm -rf docs && mkdir -p docs/swagger && \
@@ -92,6 +96,10 @@ RUN go mod download
 
 # Copy CLI source
 COPY tools/cli/ ./
+
+# Sync go.mod/go.sum — release tags built via `git archive` can be slightly
+# out of sync, causing `go build` to fail with "updates to go.mod needed"
+RUN go mod tidy
 
 # Cross-compile CLI binary
 # Re-declare version args to bust cache when version changes.

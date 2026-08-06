@@ -26,14 +26,17 @@ type DomainClassifierMCPAdapter struct {
 }
 
 // NewDomainClassifierMCPAdapter creates a new adapter.
+// embeddingService enables the vector classification stage; may be nil to fall
+// back to LLM-only classification.
 func NewDomainClassifierMCPAdapter(
 	modelFactory *adk.ModelFactory,
+	embeddingService EmbeddingService,
 	schemaProvider *MemorySchemaProvider,
 	docService *documents.Service,
 	log *slog.Logger,
 ) *DomainClassifierMCPAdapter {
 	return &DomainClassifierMCPAdapter{
-		classifier:     NewDocumentClassifier(modelFactory, nil, log),
+		classifier:     NewDocumentClassifier(modelFactory, embeddingService, log),
 		schemaProvider: schemaProvider,
 		docService:     docService,
 		log:            log,

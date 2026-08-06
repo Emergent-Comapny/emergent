@@ -2,7 +2,9 @@ package graph
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -41,6 +43,27 @@ func splitCommaSeparated(values []string) []string {
 		}
 	}
 	return result
+}
+
+// propertyOrderPathPattern validates property order paths.
+var propertyOrderPathPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+
+// parsePropertyOrder parses an order_by query param of the form "path:direction"
+// (e.g. "ds_score:desc" or "run_date"). Direction defaults to "desc".
+func parsePropertyOrder(raw string) (*PropertyOrderSpec, error) {
+	path := raw
+	direction := "desc"
+	if idx := strings.Index(raw, ":"); idx >= 0 {
+		path = raw[:idx]
+		direction = raw[idx+1:]
+	}
+	if path == "" || !propertyOrderPathPattern.MatchString(path) {
+		return nil, fmt.Errorf("path must match ^[A-Za-z0-9_.-]+$")
+	}
+	if direction != "asc" && direction != "desc" {
+		return nil, fmt.Errorf("direction must be 'asc' or 'desc'")
+	}
+	return &PropertyOrderSpec{Path: path, Direction: direction}, nil
 }
 
 // NewHandler creates a new graph handler.
@@ -89,6 +112,7 @@ func getUserID(c echo.Context) (*uuid.UUID, error) {
 // @Param        status query string false "Object status filter"
 // @Param        key query string false "Object key filter"
 // @Param        order query string false "Sort order (asc/desc)"
+// @Param        order_by query string false "Order by JSONB property path with optional direction (e.g. 'ds_score:desc'; default direction 'desc')"
 // @Param        related_to_id query string false "Filter objects related to this ID"
 // @Param        ids query string false "Comma-separated object IDs"
 // @Param        extraction_job_id query string false "Filter by extraction job"
@@ -158,6 +182,15 @@ func (h *Handler) ListObjects(c echo.Context) error {
 	// Parse order (asc/desc)
 	if order := c.QueryParam("order"); order == "asc" || order == "desc" {
 		params.Order = order
+	}
+
+	// Parse order_by (property path with optional direction, e.g. "ds_score:desc")
+	if orderBy := c.QueryParam("order_by"); orderBy != "" {
+		spec, err := parsePropertyOrder(orderBy)
+		if err != nil {
+			return apperror.ErrBadRequest.WithMessage("invalid order_by: " + err.Error())
+		}
+		params.PropertyOrder = spec
 	}
 
 	// Parse related_to_id

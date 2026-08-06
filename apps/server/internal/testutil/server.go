@@ -217,7 +217,7 @@ func NewTestServerWithLLM(testDB *TestDB) *TestServer {
 
 	// Build domain classifier so pre-classification works in-process tests.
 	extractionSchemaProvider := extraction.NewMemorySchemaProvider(db, log)
-	domainClassifier := extraction.NewDomainClassifierMCPAdapter(modelFactory, extractionSchemaProvider, docsSvc, log)
+	domainClassifier := extraction.NewDomainClassifierMCPAdapter(modelFactory, nil, extractionSchemaProvider, docsSvc, log)
 
 	// Wire all domain MCP adapters — mirrors registerDomainToolsWithMCP in module.go.
 	jobsCfg := extraction.DefaultObjectExtractionConfig()

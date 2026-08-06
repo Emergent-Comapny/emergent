@@ -181,24 +181,24 @@ func (s *Service) executeUploadDocument(ctx context.Context, projectID string, a
 		FileHash:  fileHash,
 	}
 
-	// Upload to storage if available, otherwise store with empty keys (local/dev)
-	if s.storageSvc != nil && s.storageSvc.Enabled() {
-		key := storage.GenerateDocumentKey(projectID, orgID, filename)
-		uploadResult, err := s.storageSvc.UploadDocument(ctx, bytes.NewReader(decoded), int64(len(decoded)), storage.DocumentUploadOptions{
-			OrgID:     orgID,
-			ProjectID: projectID,
-			Filename:  filename,
-			UploadOptions: storage.UploadOptions{
-				ContentType: mimeType,
-			},
-		})
-		if err != nil {
-			return nil, fmt.Errorf("upload_document: storage upload failed: %w", err)
-		}
-		_ = key
-		uploadParams.StorageKey = uploadResult.Key
-		uploadParams.StorageURL = uploadResult.StorageURL
+	// Upload to storage. Fail loudly when storage is unavailable instead of
+	// silently creating an unusable document record with no content.
+	if s.storageSvc == nil || !s.storageSvc.Enabled() {
+		return nil, fmt.Errorf("upload_document: object storage is not configured — document content cannot be stored")
 	}
+	uploadResult, err := s.storageSvc.UploadDocument(ctx, bytes.NewReader(decoded), int64(len(decoded)), storage.DocumentUploadOptions{
+		OrgID:     orgID,
+		ProjectID: projectID,
+		Filename:  filename,
+		UploadOptions: storage.UploadOptions{
+			ContentType: mimeType,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("upload_document: storage upload failed: %w", err)
+	}
+	uploadParams.StorageKey = uploadResult.Key
+	uploadParams.StorageURL = uploadResult.StorageURL
 
 	resp, err := s.documentsSvc.CreateFromUpload(ctx, uploadParams)
 	if err != nil {

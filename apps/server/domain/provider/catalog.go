@@ -14,6 +14,7 @@ import (
 	"cloud.google.com/go/auth/credentials"
 	"google.golang.org/genai"
 
+	"github.com/emergent-company/emergent.memory/pkg/embeddings/openai"
 	"github.com/emergent-company/emergent.memory/pkg/embeddings/vertex"
 	"github.com/emergent-company/emergent.memory/pkg/logger"
 )
@@ -441,9 +442,31 @@ func (s *ModelCatalogService) embedContentForModel(ctx context.Context, provider
 		}
 
 	case ProviderOpenAI:
-		// Embedding is not supported for OpenAI-compatible providers.
-		// Return the model name as "not supported" — non-fatal.
-		return "not supported", nil
+		// OpenAI-compatible providers (including LiteLLM proxies): use the
+		// OpenAI-compatible embeddings client to verify the configured
+		// embedding model works end-to-end.
+		if cred.BaseURL == "" {
+			return "", fmt.Errorf("embedding model test failed: openai-compatible provider requires base_url")
+		}
+		if cred.EmbeddingModel == "" {
+			return "", fmt.Errorf("embedding model test failed: openai-compatible provider requires an embedding model")
+		}
+		client, clientErr := openai.NewClient(openai.Config{
+			APIKey:  cred.APIKey,
+			BaseURL: cred.BaseURL,
+			Model:   cred.EmbeddingModel,
+		})
+		if clientErr != nil {
+			return "", fmt.Errorf("embedding model test failed: %w", clientErr)
+		}
+		vec, embedErr := client.EmbedQuery(ctx, "test")
+		if embedErr != nil {
+			return "", fmt.Errorf("embedding model test failed: %w", embedErr)
+		}
+		if len(vec) == 0 {
+			return "", fmt.Errorf("embedding model test failed: empty vector returned")
+		}
+		return cred.EmbeddingModel, nil
 
 	case ProviderDeepSeek:
 		// DeepSeek has no embedding API.

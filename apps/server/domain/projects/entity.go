@@ -111,6 +111,7 @@ type ProjectDTO struct {
 	ChatPromptTemplate *string        `json:"chat_prompt_template,omitempty"`
 	AutoExtractObjects *bool          `json:"auto_extract_objects,omitempty"`
 	AutoExtractConfig  map[string]any `json:"auto_extract_config,omitempty"`
+	BudgetUSD          *float64       `json:"budget_usd,omitempty"`
 	Stats              *ProjectStats  `json:"stats,omitempty"`
 	// MainBranchID is the UUID of the project's root branch (parent_branch_id IS NULL).
 	// Callers can use this as targetBranchID when merging without knowing the branch UUID,
@@ -157,6 +158,7 @@ func (p *Project) ToDTO() ProjectDTO {
 		OrgID:              p.OrganizationID,
 		ProjectInfo:        p.ProjectInfo,
 		ChatPromptTemplate: p.ChatPromptTemplate,
+		BudgetUSD:          p.BudgetUSD,
 		Stats:              p.Stats,
 	}
 

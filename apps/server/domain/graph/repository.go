@@ -134,6 +134,12 @@ func (r *Repository) GetUnused(ctx context.Context, projectID uuid.UUID, limit i
 	return objects, nil
 }
 
+// PropertyOrderSpec describes an optional ORDER BY on a user-defined JSONB property.
+type PropertyOrderSpec struct {
+	Path      string // dot-notation path, e.g. ds_score, address.city
+	Direction string // asc or desc
+}
+
 // ListParams contains parameters for listing graph objects.
 type ListParams struct {
 	ProjectID       uuid.UUID
@@ -147,13 +153,29 @@ type ListParams struct {
 	IncludeDeleted  bool
 	Limit           int
 	Cursor          *string
-	Order           string           // "asc" or "desc" (default: "desc")
-	RelatedToID     *uuid.UUID       // Filter by related object
-	IDs             []uuid.UUID      // Filter by specific IDs
-	ExtractionJobID *uuid.UUID       // Filter by extraction job
-	PropertyFilters []PropertyFilter // JSONB property filters
-	Fields          []string         // Property field projection (include only these property keys)
-	Namespace       *string          // Filter by namespace
+	Order           string             // "asc" or "desc" (default: "desc")
+	RelatedToID     *uuid.UUID         // Filter by related object
+	IDs             []uuid.UUID        // Filter by specific IDs
+	ExtractionJobID *uuid.UUID         // Filter by extraction job
+	PropertyFilters []PropertyFilter   // JSONB property filters
+	Fields          []string           // Property field projection (include only these property keys)
+	Namespace       *string            // Filter by namespace
+	PropertyOrder   *PropertyOrderSpec // optional property-based ordering
+}
+
+// numericPropertyKeywords are substrings that hint a property path holds a
+// numeric value, used to choose between text and numeric ORDER BY expressions.
+var numericPropertyKeywords = []string{"score", "count", "price", "amount", "number", "run_date"}
+
+// isNumericPropertyPath reports whether a property path likely holds a numeric value.
+func isNumericPropertyPath(path string) bool {
+	lower := strings.ToLower(path)
+	for _, kw := range numericPropertyKeywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 // applyPropertyFilters applies JSONB property filters to a Bun select query.
@@ -346,23 +368,47 @@ func (r *Repository) List(ctx context.Context, params ListParams) ([]*GraphObjec
 			"extraction_job_id", "extraction_confidence", "needs_review", "reviewed_by", "reviewed_at",
 			"content_hash")
 
-	// Pagination via cursor (created_at, id)
-	if params.Cursor != nil {
-		cursorData, err := decodeCursor(*params.Cursor)
-		if err != nil {
-			return nil, apperror.ErrBadRequest.WithMessage("invalid cursor")
+	// Property-based ordering: ORDER BY the JSONB property accessor with id as a
+	// tiebreaker. Keyset cursor pagination encodes (created_at, id), which is
+	// incompatible with this sort order, so reject it explicitly.
+	if params.PropertyOrder != nil {
+		if params.Cursor != nil {
+			return nil, apperror.ErrBadRequest.WithMessage("cursor-based pagination is not supported with property ordering")
 		}
-		if params.Order == "asc" {
-			q = q.Where("(created_at, id) > (?, ?)", cursorData.CreatedAt, cursorData.ID)
-		} else {
-			q = q.Where("(created_at, id) < (?, ?)", cursorData.CreatedAt, cursorData.ID)
-		}
-	}
 
-	if params.Order == "asc" {
-		q = q.Order("created_at ASC", "id ASC")
+		textAccessor, _, ok := propertyAccessors(params.PropertyOrder.Path)
+		if !ok {
+			return nil, apperror.ErrBadRequest.WithMessage("invalid property order path")
+		}
+		dir := strings.ToUpper(params.PropertyOrder.Direction)
+		if dir == "" {
+			dir = "DESC"
+		}
+		if isNumericPropertyPath(params.PropertyOrder.Path) {
+			q = q.OrderExpr(fmt.Sprintf("(%s)::numeric %s NULLS LAST", textAccessor, dir))
+		} else {
+			q = q.OrderExpr(fmt.Sprintf("%s %s NULLS LAST", textAccessor, dir))
+		}
+		q = q.Order("id " + dir)
 	} else {
-		q = q.Order("created_at DESC", "id DESC")
+		// Pagination via cursor (created_at, id)
+		if params.Cursor != nil {
+			cursorData, err := decodeCursor(*params.Cursor)
+			if err != nil {
+				return nil, apperror.ErrBadRequest.WithMessage("invalid cursor")
+			}
+			if params.Order == "asc" {
+				q = q.Where("(created_at, id) > (?, ?)", cursorData.CreatedAt, cursorData.ID)
+			} else {
+				q = q.Where("(created_at, id) < (?, ?)", cursorData.CreatedAt, cursorData.ID)
+			}
+		}
+
+		if params.Order == "asc" {
+			q = q.Order("created_at ASC", "id ASC")
+		} else {
+			q = q.Order("created_at DESC", "id DESC")
+		}
 	}
 	q = q.Limit(params.Limit + 1)
 

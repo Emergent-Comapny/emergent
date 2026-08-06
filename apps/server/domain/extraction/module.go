@@ -151,6 +151,7 @@ var Module = fx.Module("extraction",
 		provideDocumentParsingWorker,
 		provideObjectExtractionJobsService,
 		provideMemorySchemaProvider,
+		provideCachedEmbeddingService,
 		provideObjectExtractionWorker,
 		provideAdminHandler,
 		provideEmbeddingControlHandler,
@@ -194,9 +195,13 @@ func registerDomainToolsWithMCP(
 	objJobsSvc *ObjectExtractionJobsService,
 	docService *documents.Service,
 	modelFactory *adk.ModelFactory,
+	cachedEmbeds *CachedEmbeddingService,
 	log *slog.Logger,
 ) {
-	classifier := NewDomainClassifierMCPAdapter(modelFactory, schemaProvider, docService, log)
+	// Wire embedding service into schema provider so GetInstalledSchemaSummaries
+	// pre-computes pack/type embeddings for vector classification.
+	schemaProvider.WithEmbeddingService(cachedEmbeds)
+	classifier := NewDomainClassifierMCPAdapter(modelFactory, cachedEmbeds, schemaProvider, docService, log)
 	schemaIndex := NewSchemaIndexMCPAdapter(schemaProvider)
 	reextraction := NewReextractionQueuerMCPAdapter(objJobsSvc)
 
@@ -210,11 +215,19 @@ func registerDomainToolsWithMCP(
 // other handlers (e.g. chat handler) — same constructor used by registerDomainToolsWithMCP.
 func NewMCPDomainClassifierHandler(
 	modelFactory *adk.ModelFactory,
+	cachedEmbeds *CachedEmbeddingService,
 	schemaProvider *MemorySchemaProvider,
 	docService *documents.Service,
 	log *slog.Logger,
 ) mcp.DomainClassifierHandler {
-	return NewDomainClassifierMCPAdapter(modelFactory, schemaProvider, docService, log)
+	schemaProvider.WithEmbeddingService(cachedEmbeds)
+	return NewDomainClassifierMCPAdapter(modelFactory, cachedEmbeds, schemaProvider, docService, log)
+}
+
+// provideCachedEmbeddingService creates a shared cached embedding service used by the
+// object extraction worker and the MCP domain classifier for vector classification.
+func provideCachedEmbeddingService(embeds *embeddings.Service, db bun.IDB, appCfg *config.Config, log *slog.Logger) *CachedEmbeddingService {
+	return NewCachedEmbeddingService(embeds, db, appCfg.Embeddings.Model, log)
 }
 
 // provideAdminHandler creates the extraction jobs admin handler
@@ -330,12 +343,11 @@ func provideObjectExtractionWorker(
 	schemaProvider *MemorySchemaProvider,
 	modelFactory *adk.ModelFactory,
 	embeds *embeddings.Service,
-	db bun.IDB,
+	cachedEmbeds *CachedEmbeddingService,
 	cfg *ExtractionConfig,
 	log *slog.Logger,
 	monitor syshealth.Monitor,
 	limitResolver adk.ModelLimitResolver,
-	appCfg *config.Config,
 ) *ObjectExtractionWorker {
 	workerConfig := &ObjectExtractionWorkerConfig{
 		PollInterval:      time.Duration(cfg.ObjectExtraction.WorkerIntervalMs) * time.Millisecond,
@@ -351,9 +363,7 @@ func provideObjectExtractionWorker(
 		cfg.ObjectExtraction.MinConcurrency,
 		cfg.ObjectExtraction.MaxConcurrency,
 	)
-	// Wire embedding service into schema provider (for vector classification).
-	// Wrap with CachedEmbeddingService to avoid redundant API calls per classification.
-	cachedEmbeds := NewCachedEmbeddingService(embeds, db, appCfg.Embeddings.Model, log)
+	// Wire shared cached embedding service into schema provider (for vector classification).
 	schemaProvider.WithEmbeddingService(cachedEmbeds)
 	return NewObjectExtractionWorker(jobs, graphService, branchService, docService, schemaProvider, modelFactory, embeds, workerConfig, log, scaler).
 		WithLimitResolver(limitResolver)

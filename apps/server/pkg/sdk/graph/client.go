@@ -219,6 +219,7 @@ type ListObjectsOptions struct {
 	Limit           int
 	Cursor          string
 	Order           string // "asc" or "desc"
+	PropertyOrder   string // e.g. "ds_score:desc"
 	RelatedToID     string
 	IDs             []string
 	ExtractionJobID string
@@ -1186,6 +1187,9 @@ func (c *Client) ListObjects(ctx context.Context, opts *ListObjectsOptions) (*Se
 		}
 		if opts.Order != "" {
 			q.Set("order", opts.Order)
+		}
+		if opts.PropertyOrder != "" {
+			q.Set("order_by", opts.PropertyOrder)
 		}
 		if opts.RelatedToID != "" {
 			q.Set("related_to_id", opts.RelatedToID)

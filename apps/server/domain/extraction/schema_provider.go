@@ -288,6 +288,7 @@ func (p *MemorySchemaProvider) GetInstalledSchemaSummaries(
 		Relation("MemorySchema").
 		Where("ptp.project_id = ?", projectID).
 		Where("ptp.active = true").
+		Where("ptp.removed_at IS NULL").
 		Scan(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -316,6 +317,20 @@ func (p *MemorySchemaProvider) GetInstalledSchemaSummaries(
 		}
 		// Collect object type names for LLM prompt and per-type embeddings.
 		typeNames := buildTypeNamesFromParsed(ms, parsedObjTypes)
+		// CLI-installed schema packs may have empty object_type_schemas in
+		// graph_schemas; their types live in kb.project_object_schema_registry.
+		// Fall back to the registry so the LLM prompt still lists the pack's types.
+		if len(typeNames) == 0 {
+			regNames, regErr := p.registryTypeNames(ctx, projectID, ms.ID)
+			if regErr != nil {
+				p.log.Warn("failed to load registry type names for schema pack",
+					slog.String("pack", ms.Name),
+					logger.Error(regErr),
+				)
+			} else {
+				typeNames = regNames
+			}
+		}
 		summary := InstalledSchemaSummary{
 			ID:                ms.ID,
 			Name:              ms.Name,
@@ -361,6 +376,30 @@ func (p *MemorySchemaProvider) GetInstalledSchemaSummaries(
 		summaries = append(summaries, summary)
 	}
 	return summaries, nil
+}
+
+// registryTypeNames returns the object type names registered for a schema pack in
+// kb.project_object_schema_registry. CLI-installed packs store their types there
+// (graph_schemas.object_type_schemas may be empty). Mirrors the registry writes in
+// schemas/repository.go AssignPackWithTypes, which store schema_id = graph_schemas.id.
+func (p *MemorySchemaProvider) registryTypeNames(ctx context.Context, projectID, schemaID string) ([]string, error) {
+	var rows []struct {
+		TypeName string `bun:"type_name"`
+	}
+	_, err := p.db.NewRaw(`
+		SELECT type_name
+		FROM kb.project_object_schema_registry
+		WHERE project_id = ? AND schema_id = ? AND enabled = true
+		ORDER BY type_name ASC
+	`, projectID, schemaID).Exec(ctx, &rows)
+	if err != nil {
+		return nil, fmt.Errorf("query registry type names: %w", err)
+	}
+	names := make([]string, 0, len(rows))
+	for _, r := range rows {
+		names = append(names, r.TypeName)
+	}
+	return names, nil
 }
 
 // buildTypeNamesFromSchema returns the object type names defined in a schema pack.
