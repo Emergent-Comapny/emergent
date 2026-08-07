@@ -1,10 +1,13 @@
 package mcp
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -1233,6 +1236,64 @@ func (s *Service) GetToolDefinitions() []ToolDefinition {
 		},
 	})
 	tools = append(tools, ToolDefinition{
+		Name:        "remember",
+		Description: "Ingest a document, conversation, or knowledge snippet into the project knowledge graph. Runs the AI extraction pipeline: text → document → classify → extract → structured entities and relationships. Use for substantive content ingestion (meeting notes, documents, decisions). For lightweight observations, use save_note instead.",
+		RequiredScope: "graph:write",
+		InputSchema: InputSchema{
+			Type: "object",
+			Properties: map[string]PropertySchema{
+				"message": {
+					Type:        "string",
+					Description: "Natural language text to ingest and extract into the knowledge graph",
+				},
+				"schema_policy": {
+					Type:        "string",
+					Description: "Schema policy: 'reuse_only' (default, reuses existing types), 'auto' (may create new types), 'ask' (asks before creating types), 'enrich' (extends existing schemas)",
+				},
+				"mode": {
+					Type:        "string",
+					Description: "Execution mode: 'sync' (default, waits for completion), 'stream' (SSE stream), 'async' (202 fire-and-forget)",
+				},
+				"dry_run": {
+					Type:        "boolean",
+					Description: "If true, preview extraction without persisting",
+				},
+			},
+			Required: []string{"message"},
+		},
+	})
+	tools = append(tools, ToolDefinition{
+		Name:        "forget",
+		Description: "Remove entities and relationships from the knowledge graph using a natural language query. Performs soft-delete (reversible via entity-restore). Use to clean up outdated or incorrect information from the graph.",
+		RequiredScope: "graph:write",
+		InputSchema: InputSchema{
+			Type: "object",
+			Properties: map[string]PropertySchema{
+				"message": {
+					Type:        "string",
+					Description: "Natural language query describing what to forget. E.g. 'the old Project Alpha details' or 'outdated email addresses from 2025'",
+				},
+				"strategy": {
+					Type:        "string",
+					Description: "Deletion strategy: 'confirm' (default, confirms before batch), 'auto' (no confirmations), 'ask' (per-call confirmation)",
+				},
+				"cascade_depth": {
+					Type:        "number",
+					Description: "How many relationship hops to cascade deletion (1=direct only, 2=default, 3=two hops)",
+				},
+				"mode": {
+					Type:        "string",
+					Description: "Execution mode: 'sync' (default), 'stream' (SSE stream), 'async' (202 fire-and-forget)",
+				},
+				"dry_run": {
+					Type:        "boolean",
+					Description: "If true, preview deletion without applying",
+				},
+			},
+			Required: []string{"message"},
+		},
+	})
+	tools = append(tools, ToolDefinition{
 		Name:        "project-briefing",
 		Description: "Get a formatted project briefing for a given task. Returns core notes, relevant past notes from semantic search, and discovered patterns and conventions — all in one call. Use at the start of a session to load all relevant context at once. No LLM calls — fast data retrieval only.",
 		RequiredScope: "graph:read",
@@ -1495,6 +1556,8 @@ var toolRequiredScope = map[string]string{
 	"search-similar":  "search",
 	// Session
 	"session-get-messages": "graph:read",
+	"remember":           "graph:write",
+	"forget":             "graph:write",
 	"project-briefing":   "graph:read",
 	// Journal (static tools; journal-list and journal-add-note are also appended below)
 	"journal-list":     "journal:read",
@@ -1907,6 +1970,10 @@ func (s *Service) ExecuteTool(ctx context.Context, projectID string, toolName st
 		return s.executeQueryKnowledge(ctx, projectID, args)
 
 	// Journal tools
+	case "remember":
+		return s.executeRemember(ctx, projectID, args)
+	case "forget":
+		return s.executeForget(ctx, projectID, args)
 	case "project-briefing":
 		return s.executeProjectBriefing(ctx, projectID, args)
 	case "journal-list":
@@ -5290,4 +5357,178 @@ func (s *Service) executeProjectBriefing(ctx context.Context, projectID string, 
 	return &ToolResult{Content: []ContentBlock{{
 		Type: "text", Text: strings.Join(sections, "\n"),
 	}}}, nil
+}
+
+// executeRemember wraps the /remember REST endpoint as an MCP tool.
+// Calls the heavyweight document ingestion pipeline via HTTP, collects SSE,
+// and returns the summary.
+func (s *Service) executeRemember(ctx context.Context, projectID string, args map[string]any) (*ToolResult, error) {
+	message, _ := args["message"].(string)
+	if message == "" {
+		return nil, fmt.Errorf("message is required")
+	}
+	mode, _ := args["mode"].(string)
+	if mode == "" {
+		mode = "sync"
+	}
+
+	body := map[string]any{
+		"message": message,
+		"mode":    mode,
+	}
+	if schemaPolicy, _ := args["schema_policy"].(string); schemaPolicy != "" {
+		body["schema_policy"] = schemaPolicy
+	}
+	if dryRun, _ := args["dry_run"].(bool); dryRun {
+		body["dry_run"] = true
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	url := fmt.Sprintf("http://localhost:%d/api/projects/%s/remember", s.serverPort, projectID)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("remember: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	if token := tokenFromContext(ctx); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	req.Header.Set("X-Project-ID", projectID)
+
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("remember: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("remember: server returned %d", resp.StatusCode)
+	}
+
+	// Collect SSE events
+	var parts []string
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" || payload == "[DONE]" {
+			continue
+		}
+		var chunk map[string]any
+		if json.Unmarshal([]byte(payload), &chunk) != nil {
+			continue
+		}
+		switch chunk["type"] {
+		case "token":
+			if token, ok := chunk["token"].(string); ok {
+				parts = append(parts, token)
+			}
+		case "done":
+			if summary, ok := chunk["summary"].(string); ok && summary != "" {
+				parts = append(parts, "\nSummary: "+summary)
+			}
+		case "error":
+			if errMsg, ok := chunk["error"].(string); ok {
+				return nil, fmt.Errorf("remember: %s", errMsg)
+			}
+		}
+	}
+
+	text := strings.Join(parts, "")
+	if text == "" {
+		text = "Remember completed (async mode — check run status)"
+	}
+	return &ToolResult{Content: []ContentBlock{{Type: "text", Text: text}}}, nil
+}
+
+// executeForget wraps the /forget REST endpoint as an MCP tool.
+func (s *Service) executeForget(ctx context.Context, projectID string, args map[string]any) (*ToolResult, error) {
+	message, _ := args["message"].(string)
+	if message == "" {
+		return nil, fmt.Errorf("message is required")
+	}
+	mode, _ := args["mode"].(string)
+	if mode == "" {
+		mode = "sync"
+	}
+
+	body := map[string]any{
+		"message": message,
+		"mode":    mode,
+	}
+	if strategy, _ := args["strategy"].(string); strategy != "" {
+		body["strategy"] = strategy
+	}
+	if cascadeDepth, ok := args["cascade_depth"].(float64); ok && cascadeDepth > 0 {
+		body["cascade_depth"] = int(cascadeDepth)
+	}
+	if dryRun, _ := args["dry_run"].(bool); dryRun {
+		body["dry_run"] = true
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	url := fmt.Sprintf("http://localhost:%d/api/projects/%s/forget", s.serverPort, projectID)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("forget: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	if token := tokenFromContext(ctx); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	req.Header.Set("X-Project-ID", projectID)
+
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("forget: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("forget: server returned %d", resp.StatusCode)
+	}
+
+	var parts []string
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" || payload == "[DONE]" {
+			continue
+		}
+		var chunk map[string]any
+		if json.Unmarshal([]byte(payload), &chunk) != nil {
+			continue
+		}
+		switch chunk["type"] {
+		case "token":
+			if token, ok := chunk["token"].(string); ok {
+				parts = append(parts, token)
+			}
+		case "done":
+			if summary, ok := chunk["summary"].(string); ok && summary != "" {
+				parts = append(parts, "\nSummary: "+summary)
+			}
+		case "error":
+			if errMsg, ok := chunk["error"].(string); ok {
+				return nil, fmt.Errorf("forget: %s", errMsg)
+			}
+		}
+	}
+
+	text := strings.Join(parts, "")
+	if text == "" {
+		text = "Forget completed (async mode — check run status)"
+	}
+	return &ToolResult{Content: []ContentBlock{{Type: "text", Text: text}}}, nil
 }
