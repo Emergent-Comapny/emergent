@@ -5236,7 +5236,7 @@ func (s *Service) executeManageNotes(ctx context.Context, projectID string, args
 			"properties": map[string]any{
 				"tier": "core",
 			},
-			"labels":         []string{"note", "core"},
+			"labels":         []any{"note", "core"},
 			"replace_labels": false,
 		}
 		return s.executeUpdateEntity(ctx, projectID, updateArgs)
