@@ -5085,7 +5085,9 @@ func (s *Service) executeRecallNotes(ctx context.Context, projectID string, args
 	}
 
 	if category != "" {
-		searchArgs["labels"] = []string{category}
+		// Don't filter via labels — the label index doesn't reliably match
+		// the Note's category. Filter post-search by properties.category instead.
+		_ = category
 	}
 
 	result, err := s.executeHybridSearch(ctx, projectID, searchArgs)
@@ -5103,6 +5105,22 @@ func (s *Service) executeRecallNotes(ctx context.Context, projectID string, args
 	}
 
 	results, _ := searchResult["data"].([]any)
+
+	// Post-search category filter — filter by properties.category.
+	if category != "" {
+		filtered := results[:0]
+		for _, r := range results {
+			item, _ := r.(map[string]any)
+			obj, _ := item["object"].(map[string]any)
+			props, _ := obj["properties"].(map[string]any)
+			cat, _ := props["category"].(string)
+			if cat == category {
+				filtered = append(filtered, r)
+			}
+		}
+		results = filtered
+	}
+
 	if len(results) == 0 {
 		return &ToolResult{Content: []ContentBlock{{Type: "text", Text: "No relevant notes found."}}}, nil
 	}
