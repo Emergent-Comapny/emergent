@@ -410,12 +410,31 @@ Prompts generate **formatted guidance** for common tasks. Each prompt accepts ar
 | **Schema Management** | `schema-version`, `schema-list`, `schema-get`, `schema-create`, `schema-delete`, `schema-assign`, `schema-assignment-update`, `schema-uninstall`, `schema-list-available`, `schema-list-installed`, `schema-migration-preview`, `migration-archive-list`, `migration-archive-get` | 13 |
 | **Metadata** | `tag-list`, `project-get`, `project-create` | 3 |
 | **Documents** | `document-list`, `document-get`, `document-upload`, `document-delete` | 4 |
-| **Agents** | `agent-question-list`, `agent-question-list-project`, `agent-question-respond`, `agent-hook-list`, `agent-hook-create`, `agent-hook-delete`, `adk-session-list`, `adk-session-get` | 8 |
+| **Agents** | `agent-question-list`, `agent-question-list-project`, `agent-question-respond`, `agent-hook-list`, `agent-hook-create`, `agent-hook-delete`, `adk-session-list`, `adk-session-get`, `remember-status` | 9 |
 | **Providers** | `provider-list-org`, `provider-configure-org`, `provider-configure-project`, `provider-models-list`, `provider-test`, `provider-usage-get` | 6 |
 | **Skills** | `skill-list`, `skill-get`, `skill-create`, `skill-update`, `skill-delete` | 5 |
 | **Tokens** | `token-list`, `token-create`, `token-get`, `token-revoke` | 4 |
 | **Embeddings** | `embedding-status`, `embedding-pause`, `embedding-resume`, `embedding-config-update` | 4 |
 | **Traces** | `trace-list`, `trace-get` | 2 |
+
+---
+
+### Remember Status Tracking
+
+**`remember-status`** - Check what an async `remember`/`forget` run actually did
+
+`remember` and `forget` support `mode=async`, returning a `run_id` immediately while the graph mutation runs in the background. Use `remember-status` with that `run_id` to poll for completion and get a summary of the graph impact.
+
+```json
+{
+  "name": "remember-status",
+  "arguments": {
+    "run_id": "uuid-here"
+  }
+}
+```
+
+Response fields: `run_id`, `status` (`running`/`completed`/`failed`), `objects_created`, `objects_updated`, `relationships_created`, `created_object_ids`, `created_relationship_ids`, `discovered_types`, `summary`, and `error` (when failed). While the run is still in progress, counts are marked partial via a `partial: true` flag. When the run created objects, embedding readiness is also reported: `embeddings_pending`, `embeddings_failed`, and `embeddings_ready` (true when nothing is still processing) — embedding status does not affect the overall `status`. Aggregation is derived from the run's recorded `entity-create`/`entity-update`/`entity-relationship-create`/`save_note`/`manage_notes` tool calls, plus any `queue-reextraction` extraction jobs and their created objects' embedding jobs.
 
 ---
 

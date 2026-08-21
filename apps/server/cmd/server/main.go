@@ -204,6 +204,17 @@ func featureFxOptions(f config.FeatureSet) []fx.Option {
 	if f.Agents {
 		opts = append(opts, agents.Module)
 		opts = append(opts, agentcompat.Module)
+		// Cross-domain wiring: give the agents MCP tool handler access to
+		// extraction jobs and graph-embedding jobs so remember-status can follow
+		// queue-reextraction calls to the async extraction jobs that perform the
+		// actual graph mutations, and report embedding readiness for the created
+		// objects. Wired here (not in agents or extraction modules) because
+		// agents → extraction → projects → agents is an import cycle and
+		// extraction.Module is loaded even when the Agents feature is off.
+		opts = append(opts, fx.Invoke(func(handler *agents.MCPToolHandler, extractionFinder mcp.ExtractionJobFinder, embeddingFinder mcp.EmbeddingJobFinder) {
+			handler.SetExtractionJobFinder(extractionFinder)
+			handler.SetEmbeddingJobFinder(embeddingFinder)
+		}))
 	}
 	if f.MCP {
 		opts = append(opts, mcp.Module)

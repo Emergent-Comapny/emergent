@@ -17,7 +17,18 @@ import (
 type MCPToolHandler struct {
 	repo     *Repository
 	executor *AgentExecutor
-	log      *slog.Logger
+	// extractionJobs resolves ObjectExtractionJob records for remember-status so
+	// it can follow queue-reextraction tool calls to the async extraction jobs
+	// that actually perform the graph mutations. Optional — injected via
+	// SetExtractionJobFinder to avoid an import cycle (agents → extraction →
+	// projects → agents). Nil disables job-following.
+	extractionJobs mcp.ExtractionJobFinder
+	// embeddingJobs resolves graph-embedding job status for the objects a
+	// remember run created, so remember-status can report embedding readiness
+	// (recall/search searchability). Optional — injected via
+	// SetEmbeddingJobFinder. Nil disables embedding tracking.
+	embeddingJobs mcp.EmbeddingJobFinder
+	log           *slog.Logger
 }
 
 // NewMCPToolHandler creates a new MCPToolHandler.
@@ -27,6 +38,21 @@ func NewMCPToolHandler(repo *Repository, executor *AgentExecutor, log *slog.Logg
 		executor: executor,
 		log:      log,
 	}
+}
+
+// SetExtractionJobFinder injects the extraction-job lookup used by
+// remember-status. Called from main.go under the Agents feature flag; the
+// extraction package cannot be imported from agents (import cycle), so this
+// uses a setter with an interface defined in the mcp package.
+func (h *MCPToolHandler) SetExtractionJobFinder(finder mcp.ExtractionJobFinder) {
+	h.extractionJobs = finder
+}
+
+// SetEmbeddingJobFinder injects the graph-embedding job lookup used by
+// remember-status. Called from main.go under the Agents feature flag; same
+// import-cycle rationale as SetExtractionJobFinder.
+func (h *MCPToolHandler) SetEmbeddingJobFinder(finder mcp.EmbeddingJobFinder) {
+	h.embeddingJobs = finder
 }
 
 // wrapResult marshals data as indented JSON into an MCP ToolResult.
@@ -1222,6 +1248,20 @@ func (h *MCPToolHandler) GetAgentToolDefinitions() []mcp.ToolDefinition {
 					"run_id": {
 						Type:        "string",
 						Description: "The UUID of the agent run to poll",
+					},
+				},
+				Required: []string{"run_id"},
+			},
+		},
+		{
+			Name:        "remember-status",
+			Description: "Check the completion state and graph-mutation summary of an async remember/forget run. Accepts the run_id returned by remember or forget in async mode. Returns status (running/completed/failed), objects_created, objects_updated, relationships_created counts, created_object_ids, created_relationship_ids, discovered_types, and a summary. Use this after remember/forget async to see whether the run finished and what it actually created.",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.PropertySchema{
+					"run_id": {
+						Type:        "string",
+						Description: "The UUID of the remember/forget agent run to check",
 					},
 				},
 				Required: []string{"run_id"},

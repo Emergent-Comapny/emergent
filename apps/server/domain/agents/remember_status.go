@@ -3,10 +3,12 @@ package agents
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 
 	"github.com/emergent-company/emergent.memory/domain/mcp"
+	"github.com/emergent-company/emergent.memory/pkg/logger"
 )
 
 // ============================================================================
@@ -24,6 +26,28 @@ var graphMutatingToolNames = []string{
 	"save_note",
 	"manage_notes",
 }
+
+// queueReextractionToolName is the tool the remember/forget agent actually calls
+// in its primary flow: it classifies the message into a document and queues an
+// async extraction job (args: document_id, schema_id; output: {"job_id": "..."})
+// instead of calling entity-create directly. The graph mutations then happen in
+// the extraction job AFTER the agent run reports completed — remember-status
+// follows these jobs so it does not under-report for the real remember flow.
+const queueReextractionToolName = "queue-reextraction"
+
+// Job status values, mirroring extraction.JobStatus (shared by the extraction
+// and embedding job queues). Defined here because agents cannot import
+// extraction (agents → extraction → projects → agents import cycle); the
+// extraction domain projects jobs through mcp.ExtractionJobInfo /
+// mcp.EmbeddingJobInfo instead.
+const (
+	jobStatusPending    = "pending"
+	jobStatusProcessing = "processing"
+	jobStatusCompleted  = "completed"
+	jobStatusFailed     = "failed"
+	jobStatusDeadLetter = "dead_letter"
+	jobStatusCancelled  = "cancelled"
+)
 
 var graphMutatingToolSet = func() map[string]bool {
 	set := make(map[string]bool, len(graphMutatingToolNames))
@@ -98,6 +122,184 @@ func aggregateRememberStatus(toolCalls []*AgentRunToolCall) rememberStatusAggreg
 
 	agg.buildSummary()
 	return agg
+}
+
+// reextractionJobIDs collects job_id values from completed queue-reextraction
+// tool call outputs ({"job_id": "<uuid>"}). These identify the async extraction
+// jobs that perform the actual graph mutations for the remember flow.
+func reextractionJobIDs(toolCalls []*AgentRunToolCall) []string {
+	var ids []string
+	for _, tc := range toolCalls {
+		if tc == nil || tc.ToolName != queueReextractionToolName || tc.Status != "completed" {
+			continue
+		}
+		id := mapStr(tc.Output, "job_id")
+		if id == "" {
+			id = mapStr(tc.Output, "jobId") // defensive: camelCase variant
+		}
+		if id != "" {
+			addID(&ids, id)
+		}
+	}
+	return ids
+}
+
+// aggregateExtractionJobs merges the persisted results of completed extraction
+// jobs into an aggregation and reports whether any job is still in flight
+// (pending) or failed/dead-lettered.
+//
+// ObjectsMerged is computed at job completion but NOT persisted on the job row,
+// so update counts cannot be recovered from extraction jobs — only
+// tool-call-derived aggregation provides objects_updated.
+func aggregateExtractionJobs(jobs []*mcp.ExtractionJobInfo) (agg rememberStatusAggregation, pending bool, failures []string) {
+	agg = rememberStatusAggregation{
+		CreatedObjectIDs:       []string{},
+		CreatedRelationshipIDs: []string{},
+		DiscoveredTypes:        []string{},
+	}
+	for _, job := range jobs {
+		if job == nil {
+			continue
+		}
+		switch job.Status {
+		case jobStatusPending, jobStatusProcessing:
+			// Still in flight — remembering isn't done until extraction finishes.
+			pending = true
+		case jobStatusCancelled:
+			// Cancelled jobs are terminal and never produce results; neither
+			// pending nor a failure.
+			continue
+		case jobStatusCompleted:
+			agg.ObjectsCreated += job.ObjectsCreated
+			agg.RelationshipsCreated += job.RelationshipsCreated
+			for _, id := range job.CreatedObjectIDs {
+				addID(&agg.CreatedObjectIDs, id)
+			}
+			for _, t := range job.DiscoveredTypes {
+				addType(&agg.DiscoveredTypes, t)
+			}
+		case jobStatusFailed:
+			failures = append(failures, fmt.Sprintf("job %s failed: %s", job.ID, extractionJobErr(job)))
+		case jobStatusDeadLetter:
+			failures = append(failures, fmt.Sprintf("job %s dead-lettered: %s", job.ID, extractionJobErr(job)))
+		}
+	}
+	return agg, pending, failures
+}
+
+// extractionJobErr returns the job's error message or a placeholder.
+func extractionJobErr(job *mcp.ExtractionJobInfo) string {
+	if job.ErrorMessage != nil && *job.ErrorMessage != "" {
+		return *job.ErrorMessage
+	}
+	return "no error message"
+}
+
+// embeddingStatusSummary summarizes embedding-generation readiness for the
+// objects a remember run created (third async stage after the agent run and the
+// extraction job). Objects with no embedding job row ("" status) or a terminal
+// completed/cancelled status count as ready — nothing is blocking recall for
+// them.
+type embeddingStatusSummary struct {
+	// Pending is the number of created objects whose embedding job is not yet
+	// completed (pending or processing).
+	Pending int
+	// Failed is the number of created objects whose embedding job failed or
+	// dead-lettered.
+	Failed int
+}
+
+// aggregateEmbeddingStatus classifies per-object embedding-job statuses into
+// pending/failed counts. Embedding readiness is NOT part of the remember-status
+// "completed" gate: graph mutation (what "remember succeeded" means) is done
+// once the extraction jobs finish, and embeddings are a separate, independently
+// retryable concern (searchability). Failing the whole status on embeddings
+// would conflate "did remember persist the memory" with "is it recallable yet"
+// — instead embeddings_ready is exposed as a separate signal callers can poll
+// if they want full recall-readiness. Permanently failed embeddings are
+// surfaced via embeddings_failed and a summary note, without failing the
+// overall status.
+func aggregateEmbeddingStatus(infos []mcp.EmbeddingJobInfo) embeddingStatusSummary {
+	var s embeddingStatusSummary
+	for _, info := range infos {
+		switch info.Status {
+		case jobStatusPending, jobStatusProcessing:
+			s.Pending++
+		case jobStatusFailed, jobStatusDeadLetter:
+			s.Failed++
+		}
+	}
+	return s
+}
+
+// embeddingSummaryNote returns a human-readable note appended to the run
+// summary when embeddings are not yet fully ready, or "" when all created
+// objects are recall-ready. total is the number of created objects checked.
+func embeddingSummaryNote(pending, failed, total int) string {
+	if pending > 0 {
+		return fmt.Sprintf(" Embeddings still processing (%d/%d pending) — recall may not find these yet.", pending, total)
+	}
+	if failed > 0 {
+		return fmt.Sprintf(" %d object(s) failed embedding generation — recall may miss these.", failed)
+	}
+	return ""
+}
+
+// merge folds another aggregation's counts/ids/types into this one and rebuilds
+// the combined summary. Used to merge tool-call-derived results with
+// extraction-job-derived results.
+func (a *rememberStatusAggregation) merge(other rememberStatusAggregation) {
+	a.ObjectsCreated += other.ObjectsCreated
+	a.ObjectsUpdated += other.ObjectsUpdated
+	a.RelationshipsCreated += other.RelationshipsCreated
+	a.FailedToolCalls += other.FailedToolCalls
+	for _, id := range other.CreatedObjectIDs {
+		addID(&a.CreatedObjectIDs, id)
+	}
+	for _, id := range other.CreatedRelationshipIDs {
+		addID(&a.CreatedRelationshipIDs, id)
+	}
+	for _, t := range other.DiscoveredTypes {
+		addType(&a.DiscoveredTypes, t)
+	}
+	a.buildSummary()
+}
+
+// overallRememberStatus merges the agent run lifecycle state with the state of
+// any extraction jobs the run queued via queue-reextraction, producing the
+// final remember-status status and (for failed) a human-readable error.
+//
+// Semantics:
+//   - "running": the agent run is not yet terminal, OR any queued extraction
+//     job is still pending/processing — remembering is not done until the
+//     extraction that performs the actual graph mutations finishes.
+//   - "failed": the agent run failed, OR (the agent run completed but an
+//     extraction job failed/dead-lettered). A failed extraction job is treated
+//     as a failed remember even when the agent itself succeeded, because the
+//     graph mutations the caller asked for never happened; the job errors are
+//     surfaced in the error field alongside whatever partial counts succeeded.
+//   - "completed": the agent run is terminal and all queued extraction jobs are
+//     terminal (completed/failed/dead-lettered handled above; no jobs → done).
+func overallRememberStatus(runStatus AgentRunStatus, agentErr string, jobsPending bool, jobFailures []string) (status, errMsg string) {
+	agentStatus, terminal, agentTerminalErr := rememberStatusFromRunStatus(runStatus)
+
+	if !terminal || jobsPending {
+		return "running", ""
+	}
+	if agentStatus == "failed" {
+		msg := agentErr
+		if msg == "" {
+			msg = agentTerminalErr
+		}
+		if msg == "" {
+			msg = "run failed"
+		}
+		return "failed", msg
+	}
+	if len(jobFailures) > 0 {
+		return "failed", "extraction job(s) failed: " + strings.Join(jobFailures, "; ")
+	}
+	return "completed", ""
 }
 
 // parseEntityCreate counts created entities (and any inline relationships
@@ -384,7 +586,9 @@ func rememberStatusFromRunStatus(s AgentRunStatus) (status string, terminal bool
 // ============================================================================
 
 // ExecuteRememberStatus reports the completion state and graph-mutation summary
-// of an async remember/forget run, derived from the run's recorded tool calls.
+// of an async remember/forget run, derived from the run's recorded tool calls
+// AND the async extraction jobs it queued via queue-reextraction (the actual
+// mutation path for the primary remember flow).
 // Follows the same validate → lookup → respond pattern as ExecuteGetRunStatus.
 func (h *MCPToolHandler) ExecuteRememberStatus(ctx context.Context, projectID string, args map[string]any) (*mcp.ToolResult, error) {
 	runID, _ := args["run_id"].(string)
@@ -400,44 +604,99 @@ func (h *MCPToolHandler) ExecuteRememberStatus(ctx context.Context, projectID st
 		return errResult(fmt.Sprintf("agent run not found: %s", runID))
 	}
 
-	result := map[string]any{"run_id": run.ID}
-
-	status, terminal, terminalErr := rememberStatusFromRunStatus(run.Status)
-	result["status"] = status
-
-	// Still running: report partial counts from tool calls recorded so far.
-	if !terminal {
-		result["partial"] = true
-		if toolCalls, err := h.repo.FindToolCallsByRunID(ctx, runID); err == nil {
-			agg := aggregateRememberStatus(toolCalls)
-			for k, v := range agg.toMap() {
-				result[k] = v
-			}
-			result["summary"] = "Run is still in progress — counts are partial. " + agg.Summary
-		} else {
-			result["summary"] = "Run is still in progress — no tool-call data available yet."
-		}
-		return wrapResult(result)
-	}
-
 	toolCalls, err := h.repo.FindToolCallsByRunID(ctx, runID)
 	if err != nil {
 		return errResult("failed to get run tool calls: " + err.Error())
 	}
+
+	// Aggregate direct graph-mutating tool calls (entity-create, save_note, ...).
 	agg := aggregateRememberStatus(toolCalls)
+
+	// Follow queue-reextraction calls to the async extraction jobs they queued.
+	// The actual graph mutations for the primary remember flow happen there,
+	// AFTER the agent run itself completes.
+	jobIDs := reextractionJobIDs(toolCalls)
+	var jobs []*mcp.ExtractionJobInfo
+	if len(jobIDs) > 0 {
+		if h.extractionJobs == nil {
+			h.log.Warn("remember-status: extraction job finder not configured; cannot follow queue-reextraction jobs",
+				slog.String("run_id", runID))
+		} else {
+			for _, jid := range jobIDs {
+				job, ferr := h.extractionJobs.FindByID(ctx, jid)
+				if ferr != nil {
+					h.log.Warn("remember-status: failed to look up extraction job",
+						slog.String("job_id", jid), slog.String("run_id", runID), logger.Error(ferr))
+					continue
+				}
+				if job == nil {
+					// Job row not visible yet — treat as in-flight so we never
+					// claim completion before extraction has actually run.
+					jobs = append(jobs, &mcp.ExtractionJobInfo{ID: jid, Status: jobStatusPending})
+					continue
+				}
+				jobs = append(jobs, job)
+			}
+		}
+	}
+	jobAgg, jobsPending, jobFailures := aggregateExtractionJobs(jobs)
+	agg.merge(jobAgg)
+
+	// Track embedding generation for the created objects — a third async stage.
+	// Embedding readiness does NOT gate the "completed" status (the memorize
+	// operation itself succeeded once graph mutation is done); it is reported as
+	// a separate signal callers can poll on for full recall-readiness.
+	createdIDs := agg.CreatedObjectIDs
+	var embSummary embeddingStatusSummary
+	embTracked := false
+	if len(createdIDs) > 0 {
+		if h.embeddingJobs == nil {
+			h.log.Warn("remember-status: embedding job finder not configured; cannot report embedding readiness",
+				slog.String("run_id", runID))
+		} else {
+			infos, eerr := h.embeddingJobs.FindByObjectIDs(ctx, createdIDs)
+			if eerr != nil {
+				h.log.Warn("remember-status: failed to look up embedding jobs",
+					slog.String("run_id", runID), logger.Error(eerr))
+			} else {
+				embSummary = aggregateEmbeddingStatus(infos)
+				embTracked = true
+			}
+		}
+	}
+
+	agentErr := ""
+	if run.ErrorMessage != nil {
+		agentErr = *run.ErrorMessage
+	}
+	status, statusErr := overallRememberStatus(run.Status, agentErr, jobsPending, jobFailures)
+
+	result := map[string]any{"run_id": run.ID}
 	for k, v := range agg.toMap() {
 		result[k] = v
 	}
+	result["status"] = status
 
-	if status == "failed" {
-		errMsg := terminalErr
-		if run.ErrorMessage != nil && *run.ErrorMessage != "" {
-			errMsg = *run.ErrorMessage
+	summary := agg.Summary
+	if embTracked {
+		result["embeddings_pending"] = embSummary.Pending
+		result["embeddings_failed"] = embSummary.Failed
+		result["embeddings_ready"] = embSummary.Pending == 0
+		summary += embeddingSummaryNote(embSummary.Pending, embSummary.Failed, len(createdIDs))
+	}
+
+	if status == "running" {
+		result["partial"] = true
+		prefix := "Run is still in progress — counts are partial."
+		if jobsPending {
+			prefix = "Extraction is still in progress — counts are partial."
 		}
-		if errMsg == "" {
-			errMsg = "run failed"
-		}
-		result["error"] = errMsg
+		result["summary"] = prefix + " " + summary
+	} else if status == "failed" {
+		result["error"] = statusErr
+		result["summary"] = summary
+	} else {
+		result["summary"] = summary
 	}
 
 	return wrapResult(result)

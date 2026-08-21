@@ -425,6 +425,25 @@ func (s *GraphEmbeddingJobsService) GetActiveJobForObject(ctx context.Context, o
 	return job, nil
 }
 
+// FindByObjectIDs returns all graph embedding jobs for the given object IDs,
+// newest first. Used by remember-status to report embedding readiness for the
+// objects a remember run created. Returns nil for an empty input.
+func (s *GraphEmbeddingJobsService) FindByObjectIDs(ctx context.Context, objectIDs []string) ([]*GraphEmbeddingJob, error) {
+	if len(objectIDs) == 0 {
+		return nil, nil
+	}
+	var jobs []*GraphEmbeddingJob
+	err := s.db.NewSelect().
+		Model(&jobs).
+		Where("object_id IN (?)", bun.In(objectIDs)).
+		Order("created_at DESC").
+		Scan(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("find graph embedding jobs by object ids: %w", err)
+	}
+	return jobs, nil
+}
+
 // Stats returns queue statistics
 func (s *GraphEmbeddingJobsService) Stats(ctx context.Context) (*GraphEmbeddingQueueStats, error) {
 	stats := &GraphEmbeddingQueueStats{}

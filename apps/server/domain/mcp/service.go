@@ -1236,8 +1236,8 @@ func (s *Service) GetToolDefinitions() []ToolDefinition {
 		},
 	})
 	tools = append(tools, ToolDefinition{
-		Name:        "remember",
-		Description: "Ingest a document, conversation, or knowledge snippet into the project knowledge graph. Runs the AI extraction pipeline: text → document → classify → extract → structured entities and relationships. Use for substantive content ingestion (meeting notes, documents, decisions). For lightweight observations, use save_note instead.",
+		Name:          "remember",
+		Description:   "Ingest a document, conversation, or knowledge snippet into the project knowledge graph. Runs the AI extraction pipeline: text → document → classify → extract → structured entities and relationships. Use for substantive content ingestion (meeting notes, documents, decisions). For lightweight observations, use save_note instead.",
 		RequiredScope: "graph:write",
 		InputSchema: InputSchema{
 			Type: "object",
@@ -1263,8 +1263,8 @@ func (s *Service) GetToolDefinitions() []ToolDefinition {
 		},
 	})
 	tools = append(tools, ToolDefinition{
-		Name:        "forget",
-		Description: "Remove entities and relationships from the knowledge graph using a natural language query. Performs soft-delete (reversible via entity-restore). Use to clean up outdated or incorrect information from the graph.",
+		Name:          "forget",
+		Description:   "Remove entities and relationships from the knowledge graph using a natural language query. Performs soft-delete (reversible via entity-restore). Use to clean up outdated or incorrect information from the graph.",
 		RequiredScope: "graph:write",
 		InputSchema: InputSchema{
 			Type: "object",
@@ -1294,8 +1294,8 @@ func (s *Service) GetToolDefinitions() []ToolDefinition {
 		},
 	})
 	tools = append(tools, ToolDefinition{
-		Name:        "project-briefing",
-		Description: "Get a formatted project briefing for a given task. Returns core notes, relevant past notes from semantic search, and discovered patterns and conventions — all in one call. Use at the start of a session to load all relevant context at once. No LLM calls — fast data retrieval only.",
+		Name:          "project-briefing",
+		Description:   "Get a formatted project briefing for a given task. Returns core notes, relevant past notes from semantic search, and discovered patterns and conventions — all in one call. Use at the start of a session to load all relevant context at once. No LLM calls — fast data retrieval only.",
 		RequiredScope: "graph:read",
 		InputSchema: InputSchema{
 			Type: "object",
@@ -1556,9 +1556,10 @@ var toolRequiredScope = map[string]string{
 	"search-similar":  "search",
 	// Session
 	"session-get-messages": "graph:read",
-	"remember":           "graph:write",
-	"forget":             "graph:write",
-	"project-briefing":   "graph:read",
+	"remember":             "graph:write",
+	"forget":               "graph:write",
+	"remember-status":      "graph:read",
+	"project-briefing":     "graph:read",
 	// Journal (static tools; journal-list and journal-add-note are also appended below)
 	"journal-list":     "journal:read",
 	"journal-add-note": "journal:write",
@@ -1835,6 +1836,8 @@ func (s *Service) ExecuteTool(ctx context.Context, projectID string, toolName st
 	case "agent-run-tool-calls":
 		return s.delegateAgentTool(ctx, projectID, toolName, args)
 	case "agent-run-status":
+		return s.delegateAgentTool(ctx, projectID, toolName, args)
+	case "remember-status":
 		return s.delegateAgentTool(ctx, projectID, toolName, args)
 
 	// Agent Catalog tools
@@ -4595,6 +4598,8 @@ func (s *Service) delegateAgentTool(ctx context.Context, projectID, toolName str
 		return s.agentToolHandler.ExecuteGetAgentRunToolCalls(ctx, projectID, args)
 	case "agent-run-status":
 		return s.agentToolHandler.ExecuteGetRunStatus(ctx, projectID, args)
+	case "remember-status":
+		return s.agentToolHandler.ExecuteRememberStatus(ctx, projectID, args)
 
 	// Agent Catalog
 	case "agent-list-available":
@@ -4946,10 +4951,14 @@ func (s *Service) executeSaveNote(ctx context.Context, projectID string, args ma
 						// Merge: take max confidence, update content
 						oldConf := 0.0
 						if props, ok := obj["properties"].(map[string]any); ok {
-							if c, ok := props["confidence"].(float64); ok { oldConf = c }
+							if c, ok := props["confidence"].(float64); ok {
+								oldConf = c
+							}
 						}
 						mergedConf := confidence
-						if oldConf > mergedConf { mergedConf = oldConf }
+						if oldConf > mergedConf {
+							mergedConf = oldConf
+						}
 						updateArgs := map[string]any{
 							"entity_id": existingID,
 							"properties": map[string]any{
@@ -5133,7 +5142,9 @@ func (s *Service) executeRecallNotes(ctx context.Context, projectID string, args
 		if id, ok := obj["id"].(string); ok && id != "" {
 			oldCount := 0.0
 			if props, ok := obj["properties"].(map[string]any); ok {
-				if uc, ok := props["use_count"].(float64); ok { oldCount = uc }
+				if uc, ok := props["use_count"].(float64); ok {
+					oldCount = uc
+				}
 			}
 			updateArgs := map[string]any{
 				"entity_id": id,
@@ -5282,7 +5293,9 @@ func (s *Service) executeProjectBriefing(ctx context.Context, projectID string, 
 	limit := 5
 	if l, ok := args["limit"].(float64); ok && l > 0 {
 		limit = int(l)
-		if limit > 20 { limit = 20 }
+		if limit > 20 {
+			limit = 20
+		}
 	}
 
 	var sections []string
@@ -5303,11 +5316,17 @@ func (s *Service) executeProjectBriefing(ctx context.Context, projectID string, 
 
 	// Helper to parse and format note results from search
 	formatNotes := func(result *ToolResult, header string) ([]string, bool) {
-		if result == nil || len(result.Content) == 0 { return nil, false }
+		if result == nil || len(result.Content) == 0 {
+			return nil, false
+		}
 		var sr map[string]any
-		if json.Unmarshal([]byte(result.Content[0].Text), &sr) != nil { return nil, false }
+		if json.Unmarshal([]byte(result.Content[0].Text), &sr) != nil {
+			return nil, false
+		}
 		data, _ := sr["data"].([]any)
-		if len(data) == 0 { return nil, false }
+		if len(data) == 0 {
+			return nil, false
+		}
 		var lines []string
 		for _, r := range data {
 			item, _ := r.(map[string]any)
@@ -5316,10 +5335,14 @@ func (s *Service) executeProjectBriefing(ctx context.Context, projectID string, 
 			content, _ := props["content"].(string)
 			cat, _ := props["category"].(string)
 			conf, _ := props["confidence"].(float64)
-			if content == "" { continue }
+			if content == "" {
+				continue
+			}
 			lines = append(lines, fmt.Sprintf("- [%s] %s (%.1f)", cat, content, conf))
 		}
-		if len(lines) == 0 { return nil, false }
+		if len(lines) == 0 {
+			return nil, false
+		}
 		return append([]string{header}, lines...), true
 	}
 
@@ -5327,10 +5350,10 @@ func (s *Service) executeProjectBriefing(ctx context.Context, projectID string, 
 
 	// 1. Core notes (label-based, no embeddings needed)
 	if coreResult, err := s.executeHybridSearch(ctx, projectID, map[string]any{
-		"query": "core",
-		"types": []any{"Note"},
+		"query":  "core",
+		"types":  []any{"Note"},
 		"labels": []any{"core"},
-		"limit": flimit,
+		"limit":  flimit,
 	}); err == nil {
 		if coreLines, ok := formatNotes(coreResult, "\n### Core Notes"); ok {
 			sections = append(sections, coreLines...)
@@ -5350,10 +5373,10 @@ func (s *Service) executeProjectBriefing(ctx context.Context, projectID string, 
 
 	// 3. Patterns
 	if patResult, err := s.executeHybridSearch(ctx, projectID, map[string]any{
-		"query": query,
-		"types": []any{"Note"},
+		"query":  query,
+		"types":  []any{"Note"},
 		"labels": []any{"pattern"},
-		"limit": 3.0,
+		"limit":  3.0,
 	}); err == nil {
 		if patLines, ok := formatNotes(patResult, "\n### Patterns"); ok {
 			sections = append(sections, patLines...)
@@ -5362,10 +5385,10 @@ func (s *Service) executeProjectBriefing(ctx context.Context, projectID string, 
 
 	// 4. Conventions
 	if convResult, err := s.executeHybridSearch(ctx, projectID, map[string]any{
-		"query": query,
-		"types": []any{"Note"},
+		"query":  query,
+		"types":  []any{"Note"},
 		"labels": []any{"convention"},
-		"limit": 3.0,
+		"limit":  3.0,
 	}); err == nil {
 		if convLines, ok := formatNotes(convResult, "\n### Conventions"); ok {
 			sections = append(sections, convLines...)
@@ -5425,6 +5448,23 @@ func (s *Service) executeRemember(ctx context.Context, projectID string, args ma
 		return nil, fmt.Errorf("remember: server returned %d", resp.StatusCode)
 	}
 
+	// Async mode returns a 202 JSON body {run_id, status, document_id} instead of SSE.
+	if mode == "async" {
+		var asyncResp struct {
+			RunID string `json:"run_id"`
+		}
+		runID := ""
+		if json.NewDecoder(resp.Body).Decode(&asyncResp) == nil {
+			runID = asyncResp.RunID
+		}
+		text := "Remember started"
+		if runID != "" {
+			text = fmt.Sprintf("Remember started (run_id: %s)", runID)
+		}
+		text += " — call remember-status(run_id) to check completion and see what was created"
+		return &ToolResult{Content: []ContentBlock{{Type: "text", Text: text}}}, nil
+	}
+
 	// Collect SSE events
 	var parts []string
 	scanner := bufio.NewScanner(resp.Body)
@@ -5459,7 +5499,7 @@ func (s *Service) executeRemember(ctx context.Context, projectID string, args ma
 
 	text := strings.Join(parts, "")
 	if text == "" {
-		text = "Remember completed (async mode — check run status)"
+		text = "Remember completed — call remember-status(run_id) to see what was created"
 	}
 	return &ToolResult{Content: []ContentBlock{{Type: "text", Text: text}}}, nil
 }
@@ -5513,6 +5553,23 @@ func (s *Service) executeForget(ctx context.Context, projectID string, args map[
 		return nil, fmt.Errorf("forget: server returned %d", resp.StatusCode)
 	}
 
+	// Async mode returns a 202 JSON body {run_id, status, document_id} instead of SSE.
+	if mode == "async" {
+		var asyncResp struct {
+			RunID string `json:"run_id"`
+		}
+		runID := ""
+		if json.NewDecoder(resp.Body).Decode(&asyncResp) == nil {
+			runID = asyncResp.RunID
+		}
+		text := "Forget started"
+		if runID != "" {
+			text = fmt.Sprintf("Forget started (run_id: %s)", runID)
+		}
+		text += " — call remember-status(run_id) to check completion and see what was created"
+		return &ToolResult{Content: []ContentBlock{{Type: "text", Text: text}}}, nil
+	}
+
 	var parts []string
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
@@ -5546,7 +5603,7 @@ func (s *Service) executeForget(ctx context.Context, projectID string, args map[
 
 	text := strings.Join(parts, "")
 	if text == "" {
-		text = "Forget completed (async mode — check run status)"
+		text = "Forget completed — call remember-status(run_id) to see what was created"
 	}
 	return &ToolResult{Content: []ContentBlock{{Type: "text", Text: text}}}, nil
 }

@@ -210,6 +210,9 @@ func (s *stubAgentToolHandler) ExecuteGetAgentRunToolCalls(_ context.Context, _ 
 func (s *stubAgentToolHandler) ExecuteGetRunStatus(_ context.Context, _ string, _ map[string]any) (*ToolResult, error) {
 	return nil, nil
 }
+func (s *stubAgentToolHandler) ExecuteRememberStatus(_ context.Context, _ string, _ map[string]any) (*ToolResult, error) {
+	return nil, nil
+}
 func (s *stubAgentToolHandler) ExecuteListAvailableAgents(_ context.Context, _ string, _ map[string]any) (*ToolResult, error) {
 	return nil, nil
 }
@@ -306,7 +309,7 @@ func TestGetToolDefinitionsForProject_NoRelaySessionsForProject(t *testing.T) {
 // =============================================================================
 
 func TestExecuteGetSessionMessages_NilService(t *testing.T) {
-	svc := &Service{graphSessionSvc: nil}
+	svc := &Service{sessionHistoryProvider: nil}
 	_, err := svc.executeGetSessionMessages(context.Background(), uuid.New().String(), map[string]any{
 		"session_id": uuid.New().String(),
 	})
@@ -315,19 +318,21 @@ func TestExecuteGetSessionMessages_NilService(t *testing.T) {
 }
 
 func TestExecuteGetSessionMessages_InvalidProjectID(t *testing.T) {
-	svc := &Service{graphSessionSvc: nil}
+	svc := &Service{sessionHistoryProvider: nil}
 	_, err := svc.executeGetSessionMessages(context.Background(), "not-a-uuid", map[string]any{
 		"session_id": uuid.New().String(),
 	})
 	require.Error(t, err)
-	// will hit nil service check first since graphSessionSvc is nil
+	// will hit nil service check first since sessionHistoryProvider is nil
 	assert.Contains(t, err.Error(), "session service not available")
 }
 
 func TestExecuteGetSessionMessages_MissingSessionID(t *testing.T) {
 	// sessionHistoryProvider is nil → "session service not available" error.
 	svc := &Service{}
-	_, err := svc.executeGetSessionMessages(context.Background(), uuid.New().String(), map[string]any{})
+	_, err := svc.executeGetSessionMessages(context.Background(), uuid.New().String(), map[string]any{
+		"session_id": uuid.New().String(),
+	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "session service not available")
 }

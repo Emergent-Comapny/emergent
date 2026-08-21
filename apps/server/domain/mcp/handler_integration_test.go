@@ -24,6 +24,7 @@ func TestMCPSessionWithAPIKey(t *testing.T) {
 		ID:        "test-user-id",
 		Email:     "test@example.com",
 		ProjectID: "test-project-id",
+		Scopes:    []string{"data:read"},
 	}
 
 	apiKey := "test-api-key-12345"
