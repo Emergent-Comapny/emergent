@@ -46,6 +46,7 @@ var Module = fx.Module("agents",
 		registerOrphanRecovery,
 		registerWorkerPool,
 		registerAgentToolHandler,
+		registerHandlerMCPToolHandler,
 		registerSessionTitleHandler,
 		registerToolPoolInvalidator,
 		registerOrgToolPoolInvalidator,
@@ -140,6 +141,13 @@ func provideMCPToolHandler(repo *Repository, executor *AgentExecutor, log *slog.
 // via setter injection to break the circular dependency (agents → mcp).
 func registerAgentToolHandler(mcpService *mcp.Service, handler *MCPToolHandler) {
 	mcpService.SetAgentToolHandler(handler)
+}
+
+// registerHandlerMCPToolHandler injects the MCPToolHandler into the REST Handler
+// so the project-scoped run route can reuse buildRememberStatus for the
+// remember-status endpoint.
+func registerHandlerMCPToolHandler(h *Handler, mcpToolHandler *MCPToolHandler) {
+	h.WithMCPToolHandler(mcpToolHandler)
 }
 
 // registerSessionTitleHandler injects the Repository (as SessionTitleHandler) into

@@ -31,6 +31,7 @@ type Handler struct {
 	providerRepo  *provider.Repository
 	sandboxStore  sandboxStoreLookup
 	modelResolver modelResolverLookup // optional; nil when modelconfig not available
+	mcpTools      *MCPToolHandler     // remember-status tool handler; wired via WithMCPToolHandler
 }
 
 // usageLookup is the internal interface for looking up project spend.
@@ -67,6 +68,14 @@ func NewHandler(repo *Repository, executor *AgentExecutor, rateLimiter *WebhookR
 // WithModelResolver attaches a model resolver to the handler (called from fx Invoke).
 func (h *Handler) WithModelResolver(mr modelResolverLookup) {
 	h.modelResolver = mr
+}
+
+// WithMCPToolHandler attaches the remember-status MCP tool handler to the REST
+// Handler so the project-scoped run route can reuse buildRememberStatus (the
+// shared aggregation used by both the MCP tool and the HTTP route). Called from
+// fx Invoke (registerHandlerMCPToolHandler).
+func (h *Handler) WithMCPToolHandler(mt *MCPToolHandler) {
+	h.mcpTools = mt
 }
 
 // getWorkspaceInfo loads sandbox details for a run, returning nil if unavailable.
@@ -1701,6 +1710,51 @@ func (h *Handler) GetProjectRun(c echo.Context) error {
 	dto.Workspace = h.getWorkspaceInfo(c.Request().Context(), runID)
 
 	return c.JSON(http.StatusOK, SuccessResponse(dto))
+}
+
+// GetRunRememberStatus handles GET /api/projects/:projectId/agent-runs/:runId/remember-status
+// @Summary      Get remember-status for a run
+// @Description  Returns the graph-mutation summary (objects created/updated/deleted, relationships, discovered types, created/deleted ids) and completion state of an async remember/forget run, following queue-reextraction jobs and embedding readiness.
+// @Tags         agents
+// @Produce      json
+// @Param        projectId path string true "Project ID (UUID)"
+// @Param        runId path string true "Run ID (UUID)"
+// @Success      200 {object} map[string]any "Remember-status result"
+// @Failure      400 {object} apperror.Error "Invalid request"
+// @Failure      401 {object} apperror.Error "Unauthorized"
+// @Failure      404 {object} apperror.Error "Run not found"
+// @Failure      500 {object} apperror.Error "Internal server error"
+// @Router       /api/projects/{projectId}/agent-runs/{runId}/remember-status [get]
+// @Security     bearerAuth
+func (h *Handler) GetRunRememberStatus(c echo.Context) error {
+	user := auth.GetUser(c)
+	if user == nil {
+		return apperror.ErrUnauthorized
+	}
+
+	projectID := c.Param("projectId")
+	if projectID == "" {
+		return apperror.NewBadRequest("projectId is required")
+	}
+
+	runID := c.Param("runId")
+	if runID == "" {
+		return apperror.NewBadRequest("runId is required")
+	}
+
+	if h.mcpTools == nil {
+		return apperror.NewInternal("remember-status not configured", errors.New("mcp tool handler not wired"))
+	}
+
+	result, err := h.mcpTools.buildRememberStatus(c.Request().Context(), projectID, runID)
+	if err != nil {
+		if errors.Is(err, errRunNotFound) {
+			return apperror.NewNotFound("AgentRun", runID)
+		}
+		return apperror.NewInternal("failed to get remember status", err)
+	}
+
+	return c.JSON(http.StatusOK, result)
 }
 
 // GetRunByID handles GET /api/v1/runs/:runId — global lookup, no project required.

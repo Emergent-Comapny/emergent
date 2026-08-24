@@ -203,7 +203,7 @@ func TestAggregateRememberStatus_ZeroMutations(t *testing.T) {
 	calls := []*AgentRunToolCall{
 		tc("entity-query", nil, map[string]any{"data": []any{}}),
 		tc("search-hybrid", nil, map[string]any{"data": []any{}}),
-		tc("recall_notes", nil, map[string]any{"result": "nothing found"}),
+		tc("entity-search", nil, map[string]any{"data": []any{}}),
 	}
 
 	agg := aggregateRememberStatus(calls)
@@ -231,6 +231,9 @@ func TestAggregateRememberStatus_MalformedOutputSkipped(t *testing.T) {
 		tc("entity-create", nil, map[string]any{}),
 		// nil output
 		{ToolName: "entity-create", Status: "completed", Output: nil},
+		// deletes without an explicit success flag
+		tc("entity-delete", map[string]any{"entity_id": "obj-x"}, map[string]any{"message": "no success flag"}),
+		tc("relationship-delete", map[string]any{"relationship_id": "rel-x"}, map[string]any{"message": "no success flag"}),
 	}
 
 	agg := aggregateRememberStatus(calls)
@@ -238,7 +241,11 @@ func TestAggregateRememberStatus_MalformedOutputSkipped(t *testing.T) {
 	if agg.ObjectsCreated != 0 || agg.ObjectsUpdated != 0 || agg.RelationshipsCreated != 0 {
 		t.Errorf("expected malformed calls to be skipped, got %+v", agg)
 	}
-	if len(agg.CreatedObjectIDs) != 0 || len(agg.CreatedRelationshipIDs) != 0 || len(agg.DiscoveredTypes) != 0 {
+	if agg.ObjectsDeleted != 0 || agg.RelationshipsDeleted != 0 {
+		t.Errorf("expected malformed delete calls to be skipped, got %+v", agg)
+	}
+	if len(agg.CreatedObjectIDs) != 0 || len(agg.CreatedRelationshipIDs) != 0 ||
+		len(agg.DeletedObjectIDs) != 0 || len(agg.DeletedRelationshipIDs) != 0 || len(agg.DiscoveredTypes) != 0 {
 		t.Errorf("expected no ids/types from malformed output, got %+v", agg)
 	}
 }
@@ -294,15 +301,57 @@ func TestRememberStatusFromRunStatus(t *testing.T) {
 }
 
 func TestGraphMutatingToolAllowlist(t *testing.T) {
-	for _, name := range []string{"entity-create", "entity-update", "entity-relationship-create"} {
+	for _, name := range []string{"entity-create", "entity-update", "entity-relationship-create", "entity-delete", "relationship-delete"} {
 		if !isGraphMutatingTool(name) {
 			t.Errorf("expected %q in allowlist", name)
 		}
 	}
-	for _, name := range []string{"entity-query", "entity-delete", "web-fetch", "remember", "save_note", "manage_notes", "recall_notes", "get_note"} {
+	for _, name := range []string{"entity-query", "entity-search", "entity-restore", "relationship-list", "web-fetch", "remember", "queue-reextraction"} {
 		if isGraphMutatingTool(name) {
 			t.Errorf("expected %q NOT in allowlist", name)
 		}
+	}
+}
+
+func TestAggregateRememberStatus_Deletes(t *testing.T) {
+	calls := []*AgentRunToolCall{
+		// entity-delete output only carries success + message; the id comes from input
+		tc("entity-delete", map[string]any{"entity_id": "obj-1"}, map[string]any{"success": true, "message": "Entity deleted successfully"}),
+		tc("entity-delete", map[string]any{"entity_id": "obj-2"}, map[string]any{"success": true, "message": "Entity deleted successfully"}),
+		// relationship-delete output carries the tombstone relationship payload
+		tc("relationship-delete", map[string]any{"relationship_id": "rel-1"}, map[string]any{
+			"success":      true,
+			"relationship": map[string]any{"id": "rel-1", "type": "works_at"},
+			"message":      "Relationship deleted successfully",
+		}),
+		// relationship-delete with id only in the input args (malformed-ish output)
+		tc("relationship-delete", map[string]any{"relationship_id": "rel-2"}, map[string]any{"success": true, "message": "Relationship deleted successfully"}),
+		// failed delete — success false in output, counted as no mutation
+		tc("entity-delete", map[string]any{"entity_id": "obj-3"}, map[string]any{"success": false, "error": "not found"}),
+	}
+
+	agg := aggregateRememberStatus(calls)
+
+	if agg.ObjectsDeleted != 2 {
+		t.Errorf("ObjectsDeleted = %d, want 2", agg.ObjectsDeleted)
+	}
+	if agg.RelationshipsDeleted != 2 {
+		t.Errorf("RelationshipsDeleted = %d, want 2", agg.RelationshipsDeleted)
+	}
+	if agg.ObjectsCreated != 0 || agg.ObjectsUpdated != 0 || agg.RelationshipsCreated != 0 {
+		t.Errorf("expected zero create/update counts, got %+v", agg)
+	}
+	if !reflect.DeepEqual(agg.DeletedObjectIDs, []string{"obj-1", "obj-2"}) {
+		t.Errorf("DeletedObjectIDs = %v, want [obj-1 obj-2]", agg.DeletedObjectIDs)
+	}
+	if !reflect.DeepEqual(agg.DeletedRelationshipIDs, []string{"rel-1", "rel-2"}) {
+		t.Errorf("DeletedRelationshipIDs = %v, want [rel-1 rel-2]", agg.DeletedRelationshipIDs)
+	}
+	if !strings.Contains(agg.Summary, "deleted 2 objects") || !strings.Contains(agg.Summary, "deleted 2 relationships") {
+		t.Errorf("Summary = %q, want delete counts", agg.Summary)
+	}
+	if agg.Summary == "No graph changes were made by this run." {
+		t.Errorf("Summary should report deletes, got %q", agg.Summary)
 	}
 }
 

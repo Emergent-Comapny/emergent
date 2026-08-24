@@ -1469,7 +1469,7 @@ func (h *Handler) AskStream(c echo.Context) error {
 type RememberStreamRequest struct {
 	Message        string `json:"message"`
 	ConversationID string `json:"conversation_id,omitempty"` // optional: continue a previous session
-	SchemaPolicy   string `json:"schema_policy,omitempty"`   // "auto" (default), "reuse_only", "ask"
+	SchemaPolicy   string `json:"schema_policy,omitempty"`   // "reuse_only" (default), "auto", "ask", "enrich"
 	DryRun         bool   `json:"dry_run,omitempty"`         // if true, extraction branch is not merged
 	Namespace      string `json:"namespace,omitempty"`       // optional: scope graph objects to a namespace
 	ParentRunID    string `json:"parent_run_id,omitempty"`
@@ -1959,8 +1959,8 @@ func (h *Handler) RememberFile(c echo.Context) error {
 	if req.SchemaPolicy == "" {
 		req.SchemaPolicy = "reuse_only"
 	}
-	if req.SchemaPolicy != "auto" && req.SchemaPolicy != "reuse_only" && req.SchemaPolicy != "ask" {
-		return apperror.ErrBadRequest.WithMessage("schema_policy must be one of: auto, reuse_only, ask")
+	if req.SchemaPolicy != "auto" && req.SchemaPolicy != "reuse_only" && req.SchemaPolicy != "ask" && req.SchemaPolicy != "enrich" {
+		return apperror.ErrBadRequest.WithMessage("schema_policy must be one of: auto, reuse_only, ask, enrich")
 	}
 
 	// Normalise mode.
@@ -2098,7 +2098,11 @@ func (h *Handler) RememberFile(c echo.Context) error {
 	}
 	if agentDef == nil {
 		var ensureErr error
-		agentDef, ensureErr = h.agentRepo.EnsureDomainRememberAgent(ctx, projectID, req.SchemaPolicy)
+		if req.SchemaPolicy == "enrich" {
+			agentDef, ensureErr = h.agentRepo.EnsureEnrichRememberAgent(ctx, projectID)
+		} else {
+			agentDef, ensureErr = h.agentRepo.EnsureDomainRememberAgent(ctx, projectID, req.SchemaPolicy)
+		}
 		if ensureErr != nil {
 			return apperror.NewInternal("failed to ensure domain-remember-agent", ensureErr)
 		}

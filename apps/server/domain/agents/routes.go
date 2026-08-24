@@ -76,6 +76,7 @@ func RegisterRoutes(e *echo.Echo, h *Handler, authMiddleware *auth.Middleware) {
 	runs.GET("/:runId/tool-calls", h.GetRunToolCalls)
 	runs.GET("/:runId/steps", h.GetRunSteps)
 	runs.GET("/:runId/questions", h.HandleListQuestionsByRun)
+	runs.GET("/:runId/remember-status", h.GetRunRememberStatus)
 
 	// --- Project-scoped agent question routes ---
 	questions := e.Group("/api/projects/:projectId/agent-questions")

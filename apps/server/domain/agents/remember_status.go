@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -22,6 +23,8 @@ var graphMutatingToolNames = []string{
 	"entity-create",
 	"entity-update",
 	"entity-relationship-create",
+	"entity-delete",
+	"relationship-delete",
 }
 
 // queueReextractionToolName is the tool the remember/forget agent actually calls
@@ -63,8 +66,12 @@ type rememberStatusAggregation struct {
 	ObjectsCreated         int
 	ObjectsUpdated         int
 	RelationshipsCreated   int
+	ObjectsDeleted         int
+	RelationshipsDeleted   int
 	CreatedObjectIDs       []string
 	CreatedRelationshipIDs []string
+	DeletedObjectIDs       []string
+	DeletedRelationshipIDs []string
 	DiscoveredTypes        []string
 	// FailedToolCalls counts graph-mutating tool calls that did not complete.
 	FailedToolCalls int
@@ -83,6 +90,8 @@ func aggregateRememberStatus(toolCalls []*AgentRunToolCall) rememberStatusAggreg
 	agg := rememberStatusAggregation{
 		CreatedObjectIDs:       []string{},
 		CreatedRelationshipIDs: []string{},
+		DeletedObjectIDs:       []string{},
+		DeletedRelationshipIDs: []string{},
 		DiscoveredTypes:        []string{},
 	}
 
@@ -102,6 +111,10 @@ func aggregateRememberStatus(toolCalls []*AgentRunToolCall) rememberStatusAggreg
 			agg.parseEntityUpdate(tc.Output)
 		case "entity-relationship-create":
 			agg.parseRelationshipCreate(tc.Output)
+		case "entity-delete":
+			agg.parseEntityDelete(tc)
+		case "relationship-delete":
+			agg.parseRelationshipDelete(tc)
 		}
 	}
 
@@ -140,6 +153,8 @@ func aggregateExtractionJobs(jobs []*mcp.ExtractionJobInfo) (agg rememberStatusA
 	agg = rememberStatusAggregation{
 		CreatedObjectIDs:       []string{},
 		CreatedRelationshipIDs: []string{},
+		DeletedObjectIDs:       []string{},
+		DeletedRelationshipIDs: []string{},
 		DiscoveredTypes:        []string{},
 	}
 	for _, job := range jobs {
@@ -237,12 +252,20 @@ func (a *rememberStatusAggregation) merge(other rememberStatusAggregation) {
 	a.ObjectsCreated += other.ObjectsCreated
 	a.ObjectsUpdated += other.ObjectsUpdated
 	a.RelationshipsCreated += other.RelationshipsCreated
+	a.ObjectsDeleted += other.ObjectsDeleted
+	a.RelationshipsDeleted += other.RelationshipsDeleted
 	a.FailedToolCalls += other.FailedToolCalls
 	for _, id := range other.CreatedObjectIDs {
 		addID(&a.CreatedObjectIDs, id)
 	}
 	for _, id := range other.CreatedRelationshipIDs {
 		addID(&a.CreatedRelationshipIDs, id)
+	}
+	for _, id := range other.DeletedObjectIDs {
+		addID(&a.DeletedObjectIDs, id)
+	}
+	for _, id := range other.DeletedRelationshipIDs {
+		addID(&a.DeletedRelationshipIDs, id)
 	}
 	for _, t := range other.DiscoveredTypes {
 		addType(&a.DiscoveredTypes, t)
@@ -380,6 +403,45 @@ func (a *rememberStatusAggregation) parseRelationshipCreate(output map[string]an
 	}
 }
 
+// parseEntityDelete counts an entity-delete tool call output. The output only
+// carries {"success": true, "message": "..."} — the deleted entity's id is read
+// from the call's input args (entity_id, a UUID or key). Calls without an
+// explicit success flag are skipped (defensive best-effort parsing).
+func (a *rememberStatusAggregation) parseEntityDelete(tc *AgentRunToolCall) {
+	if !mapBool(tc.Output, "success") {
+		return
+	}
+	a.ObjectsDeleted++
+	if id := mapStr(tc.Input, "entity_id"); id != "" {
+		addID(&a.DeletedObjectIDs, id)
+	}
+}
+
+// parseRelationshipDelete counts a relationship-delete tool call output. The
+// output carries {"success": true, "relationship": {...}} where the
+// relationship payload includes the tombstone id; fall back to the input
+// relationship_id when no id is extractable from the output.
+func (a *rememberStatusAggregation) parseRelationshipDelete(tc *AgentRunToolCall) {
+	if !mapBool(tc.Output, "success") {
+		return
+	}
+	a.RelationshipsDeleted++
+	if rel := mapMap(tc.Output, "relationship"); rel != nil {
+		if id := mapStr(rel, "id"); id != "" {
+			addID(&a.DeletedRelationshipIDs, id)
+			return
+		}
+	}
+	if id := mapStr(tc.Output, "id"); id != "" {
+		addID(&a.DeletedRelationshipIDs, id)
+		return
+	}
+	// No id extractable from the output — fall back to the input relationship_id.
+	if id := mapStr(tc.Input, "relationship_id"); id != "" {
+		addID(&a.DeletedRelationshipIDs, id)
+	}
+}
+
 // collectEntity records a created entity's id/type from a slim entity payload.
 func (a *rememberStatusAggregation) collectEntity(ent map[string]any) {
 	if id := mapStr(ent, "id"); id != "" {
@@ -402,6 +464,12 @@ func (a *rememberStatusAggregation) buildSummary() {
 	if a.RelationshipsCreated > 0 {
 		parts = append(parts, fmt.Sprintf("created %d relationships", a.RelationshipsCreated))
 	}
+	if a.ObjectsDeleted > 0 {
+		parts = append(parts, fmt.Sprintf("deleted %d objects", a.ObjectsDeleted))
+	}
+	if a.RelationshipsDeleted > 0 {
+		parts = append(parts, fmt.Sprintf("deleted %d relationships", a.RelationshipsDeleted))
+	}
 	if a.FailedToolCalls > 0 {
 		parts = append(parts, fmt.Sprintf("%d tool call(s) failed", a.FailedToolCalls))
 	}
@@ -421,6 +489,12 @@ func (a rememberStatusAggregation) toMap() map[string]any {
 	if a.CreatedRelationshipIDs == nil {
 		a.CreatedRelationshipIDs = []string{}
 	}
+	if a.DeletedObjectIDs == nil {
+		a.DeletedObjectIDs = []string{}
+	}
+	if a.DeletedRelationshipIDs == nil {
+		a.DeletedRelationshipIDs = []string{}
+	}
 	if a.DiscoveredTypes == nil {
 		a.DiscoveredTypes = []string{}
 	}
@@ -428,8 +502,12 @@ func (a rememberStatusAggregation) toMap() map[string]any {
 		"objects_created":          a.ObjectsCreated,
 		"objects_updated":          a.ObjectsUpdated,
 		"relationships_created":    a.RelationshipsCreated,
+		"objects_deleted":          a.ObjectsDeleted,
+		"relationships_deleted":    a.RelationshipsDeleted,
 		"created_object_ids":       a.CreatedObjectIDs,
 		"created_relationship_ids": a.CreatedRelationshipIDs,
+		"deleted_object_ids":       a.DeletedObjectIDs,
+		"deleted_relationship_ids": a.DeletedRelationshipIDs,
 		"discovered_types":         a.DiscoveredTypes,
 		"summary":                  a.Summary,
 	}
@@ -514,28 +592,36 @@ func rememberStatusFromRunStatus(s AgentRunStatus) (status string, terminal bool
 // MCP tool handler
 // ============================================================================
 
-// ExecuteRememberStatus reports the completion state and graph-mutation summary
+// errRunNotFound is returned by buildRememberStatus when no agent run exists for
+// the given run_id/project_id pair. It is wrapped with the run id for the
+// message (e.g. "agent run not found: <id>"); callers detect the not-found case
+// via errors.Is.
+var errRunNotFound = errors.New("agent run not found")
+
+// buildRememberStatus reports the completion state and graph-mutation summary
 // of an async remember/forget run, derived from the run's recorded tool calls
 // AND the async extraction jobs it queued via queue-reextraction (the actual
-// mutation path for the primary remember flow).
+// mutation path for the primary remember flow). It returns the raw result map
+// shared by the remember-status MCP tool and the REST route.
 // Follows the same validate → lookup → respond pattern as ExecuteGetRunStatus.
-func (h *MCPToolHandler) ExecuteRememberStatus(ctx context.Context, projectID string, args map[string]any) (*mcp.ToolResult, error) {
-	runID, _ := args["run_id"].(string)
+// The run_id is validated first; errRunNotFound (wrapped with the id) is
+// returned when no run matches.
+func (h *MCPToolHandler) buildRememberStatus(ctx context.Context, projectID, runID string) (map[string]any, error) {
 	if runID == "" {
-		return errResult("run_id is required")
+		return nil, errors.New("run_id is required")
 	}
 
 	run, err := h.repo.FindRunByIDForProject(ctx, runID, projectID)
 	if err != nil {
-		return errResult("failed to get run status: " + err.Error())
+		return nil, fmt.Errorf("failed to get run status: %w", err)
 	}
 	if run == nil {
-		return errResult(fmt.Sprintf("agent run not found: %s", runID))
+		return nil, fmt.Errorf("%w: %s", errRunNotFound, runID)
 	}
 
 	toolCalls, err := h.repo.FindToolCallsByRunID(ctx, runID)
 	if err != nil {
-		return errResult("failed to get run tool calls: " + err.Error())
+		return nil, fmt.Errorf("failed to get run tool calls: %w", err)
 	}
 
 	// Aggregate direct graph-mutating tool calls (entity-create, ...).
@@ -628,5 +714,17 @@ func (h *MCPToolHandler) ExecuteRememberStatus(ctx context.Context, projectID st
 		result["summary"] = summary
 	}
 
+	return result, nil
+}
+
+// ExecuteRememberStatus is the MCP tool entrypoint for remember-status. It
+// validates run_id presence and wraps the shared buildRememberStatus result
+// (or error) into an MCP ToolResult.
+func (h *MCPToolHandler) ExecuteRememberStatus(ctx context.Context, projectID string, args map[string]any) (*mcp.ToolResult, error) {
+	runID, _ := args["run_id"].(string)
+	result, err := h.buildRememberStatus(ctx, projectID, runID)
+	if err != nil {
+		return errResult(err.Error())
+	}
 	return wrapResult(result)
 }
