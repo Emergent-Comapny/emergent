@@ -85,3 +85,30 @@ func TestResolveProjectContext_NonUUID(t *testing.T) {
 		})
 	}
 }
+
+func TestTokenScopeGroups(t *testing.T) {
+	names := map[string]bool{}
+	count := 0
+	for _, g := range tokenScopeGroups {
+		assert.NotEmpty(t, g.Title)
+		for _, s := range g.Scopes {
+			assert.NotEmpty(t, s.Name, "empty scope name in group %q", g.Title)
+			assert.NotEmpty(t, s.Description, "empty description for %q", s.Name)
+			assert.False(t, names[s.Name], "duplicate scope %q", s.Name)
+			names[s.Name] = true
+			count++
+		}
+	}
+	// Every scope in ValidApiTokenScopes (server-side) must be documented.
+	for _, want := range []string{
+		"schema:read", "schema:write", "data:read", "data:write",
+		"agents:read", "agents:write", "projects:read", "projects:write", "chat:use",
+		"graph:read", "graph:write", "schema:migrate",
+		"branches:read", "branches:write", "search",
+		"journal:read", "journal:write", "skills:read", "skills:write",
+		"documents:read", "documents:write", "admin", "admin:all",
+	} {
+		assert.True(t, names[want], "scope %q missing from tokenScopeGroups", want)
+	}
+	assert.Equal(t, 23, count)
+}

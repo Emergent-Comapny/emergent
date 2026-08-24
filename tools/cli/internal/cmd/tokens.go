@@ -13,6 +13,58 @@ import (
 
 var uuidRegexp = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
+// tokenScope is a single API token scope with a human-readable description.
+type tokenScope struct {
+	Name        string
+	Description string
+}
+
+// tokenScopeGroups lists every valid API token scope, grouped for display.
+// Keep in sync with ValidApiTokenScopes in apps/server/domain/apitoken/entity.go.
+var tokenScopeGroups = []struct {
+	Title  string
+	Scopes []tokenScope
+}{
+	{
+		Title: "Coarse-grained (legacy)",
+		Scopes: []tokenScope{
+			{"schema:read", "Read schema definitions"},
+			{"schema:write", "Install, uninstall and modify schemas (also grants schema:migrate)"},
+			{"data:read", "Read documents, chunks, graph objects, search and journal"},
+			{"data:write", "Write documents, chunks, graph objects, ingest and extraction"},
+			{"agents:read", "Read agents and use chat"},
+			{"agents:write", "Manage agents (also grants chat:admin)"},
+			{"projects:read", "Read projects"},
+			{"projects:write", "Create and manage projects"},
+			{"chat:use", "Use chat"},
+		},
+	},
+	{
+		Title: "Fine-grained (MCP)",
+		Scopes: []tokenScope{
+			{"graph:read", "Read graph objects and relationships"},
+			{"graph:write", "Create, update and delete graph objects and relationships"},
+			{"schema:migrate", "Run schema migrations"},
+			{"branches:read", "Read graph branches"},
+			{"branches:write", "Create, merge and delete branches"},
+			{"search", "Semantic and hybrid search"},
+			{"journal:read", "Read the project journal"},
+			{"journal:write", "Write to the project journal"},
+			{"skills:read", "Read skills"},
+			{"skills:write", "Manage skills"},
+			{"documents:read", "Read documents"},
+			{"documents:write", "Write documents"},
+		},
+	},
+	{
+		Title: "Admin",
+		Scopes: []tokenScope{
+			{"admin", "MCP admin tools (project create, tokens, providers, traces, embeddings)"},
+			{"admin:all", "Full account admin - every scope (requires org admin or superadmin)"},
+		},
+	},
+}
+
 // resolveTokenIDForProject resolves a token name or ID to an ID for project-scoped tokens.
 // If nameOrID looks like a UUID, it is returned as-is. Otherwise, tokens are listed and
 // the first active token matching the name is returned.
@@ -129,6 +181,27 @@ for the specified project. Each token entry prints: Name, ID, Prefix, Type
 applicable). For project tokens, the full plaintext token value is also fetched
 and displayed — treat this output as sensitive.`,
 	RunE: runListTokens,
+}
+
+var scopesCmd = &cobra.Command{
+	Use:   "scopes",
+	Short: "List available API token scopes",
+	Long: `List all valid API token scopes with descriptions.
+
+For full account admin access, create a token with --scopes all (grants admin:all).`,
+	RunE: runListScopes,
+}
+
+func runListScopes(cmd *cobra.Command, args []string) error {
+	for _, group := range tokenScopeGroups {
+		fmt.Printf("\n%s\n", group.Title)
+		for _, s := range group.Scopes {
+			fmt.Printf("  %-16s  %s\n", s.Name, s.Description)
+		}
+	}
+	fmt.Println()
+	fmt.Println("Full account access: --scopes all  (grants admin:all)")
+	return nil
 }
 
 var createTokenCmd = &cobra.Command{
@@ -689,6 +762,7 @@ func init() {
 
 	// Register subcommands
 	tokensCmd.AddCommand(listTokensCmd)
+	tokensCmd.AddCommand(scopesCmd)
 	tokensCmd.AddCommand(createTokenCmd)
 	tokensCmd.AddCommand(getTokenCmd)
 	tokensCmd.AddCommand(revokeTokenCmd)
