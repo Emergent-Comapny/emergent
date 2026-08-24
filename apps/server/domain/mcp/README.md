@@ -434,7 +434,7 @@ Prompts generate **formatted guidance** for common tasks. Each prompt accepts ar
 }
 ```
 
-Response fields: `run_id`, `status` (`running`/`completed`/`failed`), `objects_created`, `objects_updated`, `relationships_created`, `created_object_ids`, `created_relationship_ids`, `discovered_types`, `summary`, and `error` (when failed). While the run is still in progress, counts are marked partial via a `partial: true` flag. When the run created objects, embedding readiness is also reported: `embeddings_pending`, `embeddings_failed`, and `embeddings_ready` (true when nothing is still processing) — embedding status does not affect the overall `status`. Aggregation is derived from the run's recorded `entity-create`/`entity-update`/`entity-relationship-create`/`save_note`/`manage_notes` tool calls, plus any `queue-reextraction` extraction jobs and their created objects' embedding jobs.
+Response fields: `run_id`, `status` (`running`/`completed`/`failed`), `objects_created`, `objects_updated`, `relationships_created`, `created_object_ids`, `created_relationship_ids`, `discovered_types`, `summary`, and `error` (when failed). While the run is still in progress, counts are marked partial via a `partial: true` flag. When the run created objects, embedding readiness is also reported: `embeddings_pending`, `embeddings_failed`, and `embeddings_ready` (true when nothing is still processing) — embedding status does not affect the overall `status`. Aggregation is derived from the run's recorded `entity-create`/`entity-update`/`entity-relationship-create` tool calls, plus any `queue-reextraction` extraction jobs and their created objects' embedding jobs.
 
 ---
 

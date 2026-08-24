@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"regexp"
 	"strings"
 
 	"github.com/emergent-company/emergent.memory/domain/mcp"
@@ -23,8 +22,6 @@ var graphMutatingToolNames = []string{
 	"entity-create",
 	"entity-update",
 	"entity-relationship-create",
-	"save_note",
-	"manage_notes",
 }
 
 // queueReextractionToolName is the tool the remember/forget agent actually calls
@@ -56,14 +53,6 @@ var graphMutatingToolSet = func() map[string]bool {
 	}
 	return set
 }()
-
-// manageNotesMutatingActions are the manage_notes input actions that count as
-// graph mutations. list/delete are read/no-op actions and are ignored.
-var manageNotesMutatingActions = map[string]bool{
-	"create":          true,
-	"update":          true,
-	"promote_to_core": true,
-}
 
 func isGraphMutatingTool(name string) bool {
 	return graphMutatingToolSet[name]
@@ -113,10 +102,6 @@ func aggregateRememberStatus(toolCalls []*AgentRunToolCall) rememberStatusAggreg
 			agg.parseEntityUpdate(tc.Output)
 		case "entity-relationship-create":
 			agg.parseRelationshipCreate(tc.Output)
-		case "save_note":
-			agg.parseSaveNote(tc.Output)
-		case "manage_notes":
-			agg.parseManageNotes(tc)
 		}
 	}
 
@@ -395,52 +380,6 @@ func (a *rememberStatusAggregation) parseRelationshipCreate(output map[string]an
 	}
 }
 
-// parseSaveNote counts a save_note tool call output. Two shapes are produced by
-// the underlying tool: a new Note is created (plain text result "Note saved
-// (ID: ...)") or an existing Note is merged/updated (entity-update shape).
-func (a *rememberStatusAggregation) parseSaveNote(output map[string]any) {
-	if ent := mapMap(output, "entity"); ent != nil && mapBool(output, "success") {
-		a.ObjectsUpdated++
-		if t := mapStr(ent, "type"); t != "" {
-			addType(&a.DiscoveredTypes, t)
-		}
-		return
-	}
-
-	text := mapStr(output, "result")
-	if text == "" {
-		return // unknown shape — nothing to count
-	}
-	a.ObjectsCreated++
-	addType(&a.DiscoveredTypes, "Note")
-	if id := noteIDFromText(text); id != "" {
-		addID(&a.CreatedObjectIDs, id)
-	}
-}
-
-// parseManageNotes counts a manage_notes tool call only when its input action is
-// a graph mutation (create/update/promote_to_core).
-func (a *rememberStatusAggregation) parseManageNotes(tc *AgentRunToolCall) {
-	action := mapStr(tc.Input, "action")
-	if !manageNotesMutatingActions[action] {
-		return
-	}
-
-	// update/promote_to_core delegate to the entity-update backend.
-	if ent := mapMap(tc.Output, "entity"); ent != nil && mapBool(tc.Output, "success") {
-		a.ObjectsUpdated++
-		t := mapStr(ent, "type")
-		if t == "" {
-			t = "Note"
-		}
-		addType(&a.DiscoveredTypes, t)
-		return
-	}
-
-	// create (and any other entity-create-shaped output).
-	a.parseEntityCreate(tc.Output)
-}
-
 // collectEntity records a created entity's id/type from a slim entity payload.
 func (a *rememberStatusAggregation) collectEntity(ent map[string]any) {
 	if id := mapStr(ent, "id"); id != "" {
@@ -554,16 +493,6 @@ func addType(types *[]string, t string) {
 	*types = append(*types, t)
 }
 
-var noteIDPattern = regexp.MustCompile(`ID:\s*([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})`)
-
-// noteIDFromText extracts a UUID from save_note's plain-text result, best-effort.
-func noteIDFromText(text string) string {
-	if m := noteIDPattern.FindStringSubmatch(text); len(m) > 1 {
-		return m[1]
-	}
-	return ""
-}
-
 // rememberStatusFromRunStatus maps a run's lifecycle status to the three-state
 // remember-status vocabulary (running/completed/failed).
 func rememberStatusFromRunStatus(s AgentRunStatus) (status string, terminal bool, errMsg string) {
@@ -609,7 +538,7 @@ func (h *MCPToolHandler) ExecuteRememberStatus(ctx context.Context, projectID st
 		return errResult("failed to get run tool calls: " + err.Error())
 	}
 
-	// Aggregate direct graph-mutating tool calls (entity-create, save_note, ...).
+	// Aggregate direct graph-mutating tool calls (entity-create, ...).
 	agg := aggregateRememberStatus(toolCalls)
 
 	// Follow queue-reextraction calls to the async extraction jobs they queued.

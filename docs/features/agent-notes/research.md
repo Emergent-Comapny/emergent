@@ -1,5 +1,7 @@
 # Agent Notes — Prior Art Research
 
+> **Deprecated 2026-08** — `save_note`/`recall_notes`/`get_note`/`manage_notes` removed from the memory service; the note/preference abstraction moved to the client (`entity-create` + `search-hybrid`).
+
 **Date:** 2026-03-18
 **Purpose:** Survey graph-based agent memory systems to inform and validate the `agent-notes` design.
 

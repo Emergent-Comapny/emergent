@@ -1,6 +1,6 @@
 ## Why
 
-`remember` (and `forget`) support `mode=async`, returning a `run_id` immediately and executing as a background agent that calls MCP tools (`entity-create`, `entity-update`, `entity-relationship-create`, `save_note`, etc.) to update the graph. Callers currently have no way to know when that background run finishes, whether it succeeded, or what it actually changed (which objects/relationships were created, merged, or failed). This makes async `remember` a black box — callers must guess a wait time or poll unrelated endpoints (`agent-run-status`) that report execution status but not graph impact.
+`remember` (and `forget`) support `mode=async`, returning a `run_id` immediately and executing as a background agent that calls MCP tools (`entity-create`, `entity-update`, `entity-relationship-create`, etc.) to update the graph. Callers currently have no way to know when that background run finishes, whether it succeeded, or what it actually changed (which objects/relationships were created, merged, or failed). This makes async `remember` a black box — callers must guess a wait time or poll unrelated endpoints (`agent-run-status`) that report execution status but not graph impact.
 
 ## What Changes
 
@@ -12,7 +12,7 @@
   - `discovered_types` (distinct entity/relationship types touched)
   - `summary` (short human-readable line)
   - `error` (if failed)
-- Implementation approach: aggregate `kb.agent_run_tool_calls` rows for the given `run_id`, filtering to graph-mutating tool names (`entity-create`, `entity-update`, `entity-relationship-create`, `save_note`, `manage_notes` with create/update action) and parsing each call's `output` JSON for created/updated IDs and types. No new tables or schema migrations required — this data is already recorded per tool call.
+- Implementation approach: aggregate `kb.agent_run_tool_calls` rows for the given `run_id`, filtering to graph-mutating tool names (`entity-create`, `entity-update`, `entity-relationship-create`) and parsing each call's `output` JSON for created/updated IDs and types. No new tables or schema migrations required — this data is already recorded per tool call.
 - Update `remember`/`forget` MCP tool async-mode responses to mention `remember-status(run_id)` as the follow-up call (already partially done — refine wording once the tool exists).
 - Out of scope for this change: linking the project journal (`kb.project_journal`) to `run_id` for a full mutation audit trail — deferred to a future change if deeper auditability is needed beyond tool-call aggregation.
 

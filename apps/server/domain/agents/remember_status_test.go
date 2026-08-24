@@ -230,7 +230,7 @@ func TestAggregateRememberStatus_MalformedOutputSkipped(t *testing.T) {
 		// completely empty output
 		tc("entity-create", nil, map[string]any{}),
 		// nil output
-		{ToolName: "save_note", Status: "completed", Output: nil},
+		{ToolName: "entity-create", Status: "completed", Output: nil},
 	}
 
 	agg := aggregateRememberStatus(calls)
@@ -254,66 +254,6 @@ func TestAggregateRememberStatus_UnknownToolsIgnored(t *testing.T) {
 
 	if agg.ObjectsCreated != 0 || agg.ObjectsUpdated != 0 || agg.RelationshipsCreated != 0 {
 		t.Errorf("unknown tools should be ignored, got %+v", agg)
-	}
-}
-
-func TestAggregateRememberStatus_SaveNote(t *testing.T) {
-	calls := []*AgentRunToolCall{
-		// New note created: plain-text result with an ID.
-		tc("save_note", nil, map[string]any{
-			"result": "Note saved (ID: 3f2a1b4c-9d8e-4f7a-b6c5-1e2d3f4a5b6c). Category: fact. Confidence: 0.7.",
-		}),
-		// Dedup path: merged into an existing Note (entity-update shape).
-		tc("save_note", nil, map[string]any{
-			"success": true,
-			"entity":  map[string]any{"id": "note-2", "type": "Note"},
-		}),
-	}
-
-	agg := aggregateRememberStatus(calls)
-
-	if agg.ObjectsCreated != 1 {
-		t.Errorf("ObjectsCreated = %d, want 1", agg.ObjectsCreated)
-	}
-	if agg.ObjectsUpdated != 1 {
-		t.Errorf("ObjectsUpdated = %d, want 1", agg.ObjectsUpdated)
-	}
-	if !reflect.DeepEqual(agg.CreatedObjectIDs, []string{"3f2a1b4c-9d8e-4f7a-b6c5-1e2d3f4a5b6c"}) {
-		t.Errorf("CreatedObjectIDs = %v", agg.CreatedObjectIDs)
-	}
-	if !reflect.DeepEqual(agg.DiscoveredTypes, []string{"Note"}) {
-		t.Errorf("DiscoveredTypes = %v, want [Note]", agg.DiscoveredTypes)
-	}
-}
-
-func TestAggregateRememberStatus_ManageNotesActions(t *testing.T) {
-	calls := []*AgentRunToolCall{
-		// update → counts as update
-		tc("manage_notes",
-			map[string]any{"action": "update", "note_id": "n-1"},
-			map[string]any{"success": true, "entity": map[string]any{"id": "n-1", "type": "Note"}}),
-		// promote_to_core → counts as update
-		tc("manage_notes",
-			map[string]any{"action": "promote_to_core", "note_id": "n-2"},
-			map[string]any{"success": true, "entity": map[string]any{"id": "n-2", "type": "Note"}}),
-		// list → ignored (read action)
-		tc("manage_notes", map[string]any{"action": "list"}, map[string]any{"data": []any{}}),
-		// delete → ignored (not a create/update)
-		tc("manage_notes", map[string]any{"action": "delete", "note_id": "n-3"}, map[string]any{"success": true}),
-		// missing action → ignored
-		tc("manage_notes", map[string]any{}, map[string]any{"success": true}),
-	}
-
-	agg := aggregateRememberStatus(calls)
-
-	if agg.ObjectsUpdated != 2 {
-		t.Errorf("ObjectsUpdated = %d, want 2", agg.ObjectsUpdated)
-	}
-	if agg.ObjectsCreated != 0 {
-		t.Errorf("ObjectsCreated = %d, want 0", agg.ObjectsCreated)
-	}
-	if !reflect.DeepEqual(agg.DiscoveredTypes, []string{"Note"}) {
-		t.Errorf("DiscoveredTypes = %v, want [Note]", agg.DiscoveredTypes)
 	}
 }
 
@@ -354,12 +294,12 @@ func TestRememberStatusFromRunStatus(t *testing.T) {
 }
 
 func TestGraphMutatingToolAllowlist(t *testing.T) {
-	for _, name := range []string{"entity-create", "entity-update", "entity-relationship-create", "save_note", "manage_notes"} {
+	for _, name := range []string{"entity-create", "entity-update", "entity-relationship-create"} {
 		if !isGraphMutatingTool(name) {
 			t.Errorf("expected %q in allowlist", name)
 		}
 	}
-	for _, name := range []string{"entity-query", "entity-delete", "recall_notes", "web-fetch", "remember"} {
+	for _, name := range []string{"entity-query", "entity-delete", "web-fetch", "remember", "save_note", "manage_notes", "recall_notes", "get_note"} {
 		if isGraphMutatingTool(name) {
 			t.Errorf("expected %q NOT in allowlist", name)
 		}

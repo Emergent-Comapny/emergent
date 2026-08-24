@@ -1,5 +1,7 @@
 # Agent Notes — Design Document
 
+> **Deprecated 2026-08** — `save_note`/`recall_notes`/`get_note`/`manage_notes` removed from the memory service; the note/preference abstraction moved to the client (`entity-create` + `search-hybrid`).
+
 **Status:** Superseded by `docs/features/schema-emergence/design.md`
 **Date:** 2026-03-18
 

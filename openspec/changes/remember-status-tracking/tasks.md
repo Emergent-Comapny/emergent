@@ -1,12 +1,11 @@
 ## 1. Aggregation logic
 
-- [ ] 1.1 Define the graph-mutating tool-name allowlist (`entity-create`, `entity-update`, `entity-relationship-create`, `save_note`, `manage_notes`) as a package-level constant/slice in `apps/server/domain/agents`
+- [ ] 1.1 Define the graph-mutating tool-name allowlist (`entity-create`, `entity-update`, `entity-relationship-create`) as a package-level constant/slice in `apps/server/domain/agents`
 - [ ] 1.2 Implement `aggregateRememberStatus(runID string, run *AgentRun, toolCalls []*AgentRunToolCall) map[string]any` (or equivalent) that:
   - derives `objects_created`, `objects_updated`, `relationships_created` counts
   - collects `created_object_ids` / `created_relationship_ids`
   - collects `discovered_types`
   - defensively skips tool calls with malformed/missing output fields
-  - for `manage_notes`, only counts calls where `input.action` is `create`/`update`/`promote_to_core`
 - [ ] 1.3 Unit tests for the aggregator covering: successful creates, successful updates, relationship creates, mixed success/failure calls, zero-mutation run, malformed output JSON, unknown tool names ignored
 
 ## 2. MCP tool
