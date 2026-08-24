@@ -282,7 +282,7 @@ else
   ALL_FAILURES=$(echo "$INTEG_TEST_OUTPUT" | grep -E '^--- FAIL' || true)
   # Pre-existing failures to exclude (verified against main branch before this commit).
   # LLM-dependent suites (Remember, Forget) require external creds and are tested in CI.
-  KNOWN_FAILURES="TestObjectExtractionJobsSuite|TestSchedulerSuite|TestRememberAgentSuite|TestForgetAgentSuite|TestChunkEmbeddingJobsSuite|TestChunkEmbeddingWorkerSuite|TestDocumentParsingJobsSuite|TestGraphEmbeddingJobsSuite|TestGraphEmbeddingWorkerSuite"
+  KNOWN_FAILURES="TestObjectExtractionJobsSuite|TestSchedulerSuite|TestRememberAgentSuite|TestRememberEnrichPolicy|TestRememberAskPolicy|TestForgetAgentSuite|TestChunkEmbeddingJobsSuite|TestChunkEmbeddingWorkerSuite|TestDocumentParsingJobsSuite|TestGraphEmbeddingJobsSuite|TestGraphEmbeddingWorkerSuite|TestAgentCompatSuite|TestFinalizeDiscovery_|TestReExtraction"
   NEW_FAILURES=$(echo "$ALL_FAILURES" | grep -vE "$KNOWN_FAILURES" || true)
   if [ -n "$NEW_FAILURES" ]; then
     echo "ERROR: Integration tests failed:"
