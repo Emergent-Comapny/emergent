@@ -86,6 +86,16 @@ func TestResolveProjectContext_NonUUID(t *testing.T) {
 	}
 }
 
+func TestRevokeCommand_HasDeleteAlias(t *testing.T) {
+	assert.Contains(t, revokeTokenCmd.Aliases, "delete")
+}
+
+func TestUpdateScopesCommand_Structure(t *testing.T) {
+	assert.Equal(t, "update-scopes", updateScopesCmd.Name())
+	scopesFlag := updateScopesCmd.Flag("scopes")
+	require.NotNil(t, scopesFlag)
+}
+
 func TestTokenScopeGroups(t *testing.T) {
 	names := map[string]bool{}
 	count := 0

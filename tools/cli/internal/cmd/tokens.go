@@ -233,11 +233,12 @@ account-level token.`,
 }
 
 var revokeTokenCmd = &cobra.Command{
-	Use:   "revoke [token-id]",
-	Short: "Revoke an API token",
-	Long:  "Permanently revoke an API token, making it unusable. Without --project, revokes an account-level token.",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runRevokeToken,
+	Use:     "revoke [token-id]",
+	Aliases: []string{"delete"},
+	Short:   "Revoke (delete) an API token",
+	Long:    "Permanently revoke (delete) an API token, making it unusable. Without --project, revokes an account-level token.",
+	Args:    cobra.MaximumNArgs(1),
+	RunE:    runRevokeToken,
 }
 
 var regenerateTokenCmd = &cobra.Command{
@@ -250,6 +251,19 @@ Without --project, regenerates an account-level token. With --project, regenerat
 The new plaintext token value is printed once — save it immediately.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runRegenerateToken,
+}
+
+var updateScopesCmd = &cobra.Command{
+	Use:   "update-scopes [token-id]",
+	Short: "Update a token's scopes",
+	Long: `Update the scopes of an existing API token.
+
+Without --project, updates an account-level token. With --project, updates a
+project-scoped token.
+
+Use --scopes all for full admin access (admin:all).`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runUpdateScopes,
 }
 
 var cleanupTokensCmd = &cobra.Command{
@@ -325,6 +339,7 @@ var (
 	tokenProjectID    string
 	tokenName         string
 	tokenScopes       []string
+	updateTokenScopes []string
 	tokenListLimit    int
 	tokenListPage     int
 	tokenNamePrefix   string
@@ -545,6 +560,60 @@ func runCreateToken(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runUpdateScopes(cmd *cobra.Command, args []string) error {
+	if len(updateTokenScopes) == 0 {
+		return fmt.Errorf("--scopes is required (comma-separated, or 'all' for full admin)")
+	}
+	scopes := updateTokenScopes
+	if len(scopes) == 1 && scopes[0] == "all" {
+		scopes = []string{"admin:all"}
+	}
+
+	account := tokenProjectID == ""
+
+	var c *client.Client
+	var err error
+	if account {
+		c, err = getAccountClient(cmd)
+	} else {
+		c, err = getClient(cmd)
+	}
+	if err != nil {
+		return err
+	}
+
+	projectID := ""
+	if !account {
+		projectID, err = resolveProjectContext(cmd, tokenProjectID)
+		if err != nil {
+			return err
+		}
+	}
+
+	tokenID, tokenName, err := resolveTokenArgOrPick(cmd, c, args, account, projectID)
+	if err != nil {
+		return err
+	}
+
+	if account {
+		updated, err := c.SDK.APITokens.UpdateAccountTokenScopes(context.Background(), tokenID, scopes)
+		if err != nil {
+			return fmt.Errorf("failed to update account token scopes: %w", err)
+		}
+		fmt.Printf("Updated scopes for account token %q:\n", tokenName)
+		fmt.Printf("  Scopes: %s\n", strings.Join(updated.Scopes, ", "))
+		return nil
+	}
+
+	updated, err := c.SDK.APITokens.UpdateScopes(context.Background(), projectID, tokenID, scopes)
+	if err != nil {
+		return fmt.Errorf("failed to update token scopes: %w", err)
+	}
+	fmt.Printf("Updated scopes for token %q:\n", tokenName)
+	fmt.Printf("  Scopes: %s\n", strings.Join(updated.Scopes, ", "))
+	return nil
+}
+
 func runGetToken(cmd *cobra.Command, args []string) error {
 	account := tokenProjectID == ""
 
@@ -756,6 +825,8 @@ func init() {
 	createTokenCmd.Flags().StringSliceVar(&tokenScopes, "scopes", nil, "Comma-separated scopes (e.g. --scopes data:read,data:write). Use --scopes all for full admin access.")
 	_ = createTokenCmd.MarkFlagRequired("name")
 
+	updateScopesCmd.Flags().StringSliceVar(&updateTokenScopes, "scopes", nil, "Comma-separated scopes (e.g. --scopes data:read,data:write). Use --scopes all for full admin access.")
+
 	// Cleanup flags
 	cleanupTokensCmd.Flags().StringVar(&tokenNamePrefix, "name-prefix", "", "Revoke tokens whose names start with this prefix (required)")
 	cleanupTokensCmd.Flags().BoolVar(&tokenCleanupForce, "force", false, "Skip confirmation prompt")
@@ -767,6 +838,7 @@ func init() {
 	tokensCmd.AddCommand(getTokenCmd)
 	tokensCmd.AddCommand(revokeTokenCmd)
 	tokensCmd.AddCommand(regenerateTokenCmd)
+	tokensCmd.AddCommand(updateScopesCmd)
 	tokensCmd.AddCommand(cleanupTokensCmd)
 	rootCmd.AddCommand(tokensCmd)
 }
