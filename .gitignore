@@ -101,6 +101,7 @@ tools/cli/emergent-cli-*
 tools/cli/emergent-darwin-*
 tools/cli/emergent-linux-*
 tools/cli/emergent
+tools/cli/memory
 bin/
 apps/server/tmp/
 

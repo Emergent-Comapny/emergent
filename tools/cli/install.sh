@@ -40,8 +40,9 @@ main() {
     platform=$(detect_platform)
     
     log "Fetching latest version..."
-    version=$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    version=$(curl -fsS -o /dev/null -w '%{redirect_url}' "https://github.com/${GITHUB_REPO}/releases/latest")
     [ -z "$version" ] && error "Failed to fetch latest version"
+    version="${version##*/}"
     
     local os=${platform%/*}
     local arch=${platform#*/}
