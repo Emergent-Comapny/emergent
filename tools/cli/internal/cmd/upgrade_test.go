@@ -95,3 +95,33 @@ func TestRelease_JSONParsing(t *testing.T) {
 	assert.Len(t, release.Assets, 1)
 	assert.Equal(t, "test.tar.gz", release.Assets[0].Name)
 }
+
+func TestIsMainReleaseTag(t *testing.T) {
+	cases := []struct {
+		tag  string
+		want bool
+	}{
+		{"v0.44.0", true},
+		{"v0.43.0", true},
+		{"v0.41.149", true},
+		{"v0.1.0-rc.1", false},
+		{"v0.1.0+meta", false},
+		{"apps/server/pkg/sdk/v0.41.149", false},
+		{"cli-v1.0.0", false},
+		{"0.44.0", false},
+		{"v1.0", false},
+		{"v1.0.0.1", false},
+		{"v1.0.x", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		assert.Equal(t, c.want, isMainReleaseTag(c.tag), "isMainReleaseTag(%q)", c.tag)
+	}
+}
+
+func TestPickHighestTag(t *testing.T) {
+	assert.Equal(t, "v0.44.0", pickHighestTag([]string{"v0.41.149", "v0.43.0", "v0.44.0", "v0.42.0"}))
+	assert.Equal(t, "v0.43.0", pickHighestTag([]string{"v0.43.0", "v0.41.149"}))
+	assert.Equal(t, "v0.41.149", pickHighestTag([]string{"v0.41.149"}))
+	assert.Equal(t, "", pickHighestTag(nil))
+}

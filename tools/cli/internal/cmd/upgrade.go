@@ -231,7 +231,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	cliNeedsUpgrade := latestVersion != currentVersion || upgradeFlags.force
+	cliNeedsUpgrade := compareVersions(latestVersion, currentVersion) > 0 || upgradeFlags.force
 
 	if !cliNeedsUpgrade {
 		displayCurrent := strings.TrimPrefix(Version, "v")
@@ -292,6 +292,101 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 const githubRepoBase = "https://github.com/emergent-company/emergent.memory"
 
 func getLatestRelease() (*Release, error) {
+	tag, err := highestReleaseTag()
+	if err != nil {
+		return nil, err
+	}
+
+	release := &Release{
+		TagName:     tag,
+		ImagesReady: checkImagesReady(tag),
+	}
+	release.Assets = constructAssets(tag)
+	return release, nil
+}
+
+// highestReleaseTag returns the highest-semver main-release tag (vX.Y.Z).
+// GitHub's releases/latest pointer follows publish order, not semver, so it
+// can resolve to an older version when releases are tagged out of order.
+// We therefore enumerate tags via `git ls-remote` (no GitHub API rate limit)
+// and pick the highest, falling back to the redirect when git is unavailable.
+func highestReleaseTag() (string, error) {
+	tags, err := listReleaseTags()
+	if err != nil {
+		return latestReleaseTagViaRedirect()
+	}
+	tag := pickHighestTag(tags)
+	if tag == "" {
+		return "", fmt.Errorf("no release tags found")
+	}
+	return tag, nil
+}
+
+// listReleaseTags enumerates main-release tags via `git ls-remote --tags`.
+func listReleaseTags() ([]string, error) {
+	out, err := exec.Command("git", "ls-remote", "--tags", githubRepoBase+".git").Output()
+	if err != nil {
+		return nil, err
+	}
+	var tags []string
+	for _, line := range strings.Split(string(out), "\n") {
+		idx := strings.LastIndex(line, "refs/tags/")
+		if idx < 0 {
+			continue
+		}
+		tag := strings.TrimSuffix(line[idx+len("refs/tags/"):], "^{}")
+		if isMainReleaseTag(tag) {
+			tags = append(tags, tag)
+		}
+	}
+	return tags, nil
+}
+
+// pickHighestTag returns the highest semver tag from the given list.
+func pickHighestTag(tags []string) string {
+	if len(tags) == 0 {
+		return ""
+	}
+	highest := tags[0]
+	for _, t := range tags[1:] {
+		if compareVersions(t, highest) > 0 {
+			highest = t
+		}
+	}
+	return highest
+}
+
+// isMainReleaseTag reports whether tag is a plain vX.Y.Z main release,
+// excluding prereleases (e.g. v0.1.0-rc.1) and submodule tags
+// (e.g. apps/server/pkg/sdk/v0.41.149).
+func isMainReleaseTag(tag string) bool {
+	if !strings.HasPrefix(tag, "v") {
+		return false
+	}
+	body := strings.TrimPrefix(tag, "v")
+	if strings.ContainsAny(body, "-+") {
+		return false
+	}
+	parts := strings.Split(body, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, p := range parts {
+		if p == "" {
+			return false
+		}
+		for _, c := range p {
+			if c < '0' || c > '9' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// latestReleaseTagViaRedirect resolves the tag via GitHub's releases/latest
+// redirect (fallback when git is unavailable).
+func latestReleaseTagViaRedirect() (string, error) {
 	noFollow := &http.Client{
 		Timeout: 10 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -301,35 +396,28 @@ func getLatestRelease() (*Release, error) {
 
 	resp, err := noFollow.Get(githubRepoBase + "/releases/latest")
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	resp.Body.Close()
 
 	if resp.StatusCode != http.StatusFound && resp.StatusCode != http.StatusMovedPermanently {
-		return nil, fmt.Errorf("unexpected status from releases/latest: %d", resp.StatusCode)
+		return "", fmt.Errorf("unexpected status from releases/latest: %d", resp.StatusCode)
 	}
 
 	loc := resp.Header.Get("Location")
 	if loc == "" {
-		return nil, fmt.Errorf("no Location header in redirect response")
+		return "", fmt.Errorf("no Location header in redirect response")
 	}
 
-	// Location: https://github.com/.../releases/tag/v0.35.50
 	parts := strings.Split(loc, "/")
 	if len(parts) == 0 {
-		return nil, fmt.Errorf("could not parse tag from redirect: %s", loc)
+		return "", fmt.Errorf("could not parse tag from redirect: %s", loc)
 	}
 	tag := parts[len(parts)-1]
 	if tag == "" {
-		return nil, fmt.Errorf("empty tag in redirect URL: %s", loc)
+		return "", fmt.Errorf("empty tag in redirect URL: %s", loc)
 	}
-
-	release := &Release{
-		TagName:     tag,
-		ImagesReady: checkImagesReady(tag),
-	}
-	release.Assets = constructAssets(tag)
-	return release, nil
+	return tag, nil
 }
 
 // constructAssets builds a synthetic []Asset for the given tag using the
