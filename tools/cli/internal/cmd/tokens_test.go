@@ -4,7 +4,46 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// TestNormalizeTokenScopes tests the scope resolution applied by runCreateToken.
+// runCreateToken itself requires a live client connection, so the pure
+// normalization logic is tested directly.
+func TestNormalizeTokenScopes(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  []string
+		expect []string
+	}{
+		{
+			name:   "all sentinel maps to full admin access",
+			input:  []string{"all"},
+			expect: []string{"admin:all"},
+		},
+		{
+			name:   "empty defaults to data:read",
+			input:  nil,
+			expect: []string{"data:read"},
+		},
+		{
+			name:   "comma-separated scopes are preserved",
+			input:  []string{"data:read", "data:write"},
+			expect: []string{"data:read", "data:write"},
+		},
+		{
+			name:   "all mixed with other scopes is not treated as sentinel",
+			input:  []string{"all", "data:read"},
+			expect: []string{"all", "data:read"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.expect, normalizeTokenScopes(tt.input))
+		})
+	}
+}
 
 // TestResolveProjectContext_UUIDPassthrough tests that valid UUIDs are returned as-is
 // without requiring a client lookup

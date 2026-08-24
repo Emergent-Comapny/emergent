@@ -263,6 +263,23 @@ func (r *Repository) GetUserProjectRole(ctx context.Context, projectID, userID s
 	return role, nil
 }
 
+// CanGrantAdminAll reports whether the user may grant the admin:all scope:
+// either an active superadmin (core.superadmins, revoked_at IS NULL) or an
+// org_admin in at least one organization (kb.organization_memberships).
+func (r *Repository) CanGrantAdminAll(ctx context.Context, userID string) (bool, error) {
+	var allowed bool
+	err := r.db.NewRaw(`
+		SELECT
+			EXISTS(SELECT 1 FROM core.superadmins WHERE user_id = ? AND revoked_at IS NULL)
+			OR
+			EXISTS(SELECT 1 FROM kb.organization_memberships WHERE user_id = ? AND role = 'org_admin')
+	`, userID, userID).Scan(ctx, &allowed)
+	if err != nil {
+		return false, apperror.ErrDatabase.WithInternal(err)
+	}
+	return allowed, nil
+}
+
 // RevokeByProjectAndUser revokes all active tokens for a user in a project.
 // Used when a member is removed from a project.
 func (r *Repository) RevokeByProjectAndUser(ctx context.Context, projectID, userID string) error {

@@ -1488,12 +1488,20 @@ var scopeImpliesMap = map[string][]string{
 	"schema:write":    {"schema:write", "schema:migrate"},
 	"agents:read":     {"agents:read", "skills:read"},
 	"agents:write":    {"agents:write", "skills:write"},
-	"projects:write":  {"admin"},
 	"graph:write":     {"graph:read"},
 	"branches:write":  {"branches:read"},
 	"journal:write":   {"journal:read"},
 	"skills:write":    {"skills:read"},
 	"documents:write": {"documents:read"},
+	"admin:all": {
+		"admin", "graph:read", "graph:write",
+		"schema:read", "schema:write", "schema:migrate",
+		"branches:read", "branches:write", "search",
+		"journal:read", "journal:write",
+		"skills:read", "skills:write",
+		"documents:read", "documents:write",
+		"agents:read", "agents:write", "chat:use", "chat:admin",
+	},
 }
 
 // toolIndex is built once from the full tool list for O(1) lookups in handleToolsCall.

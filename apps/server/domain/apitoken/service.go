@@ -73,6 +73,36 @@ var viewerReadOnlyScopes = map[string]bool{
 	"projects:read": true,
 }
 
+// errAdminAllScopeDenied is returned when a caller attempts to grant admin:all
+// without org-admin or superadmin privileges.
+var errAdminAllScopeDenied = apperror.New(403, "admin-all-scope-denied",
+	"admin:all scope requires org admin or superadmin privileges")
+
+// scopesContainAdminAll reports whether scopes includes the admin:all scope.
+func scopesContainAdminAll(scopes []string) bool {
+	for _, sc := range scopes {
+		if sc == "admin:all" {
+			return true
+		}
+	}
+	return false
+}
+
+// checkAdminAllGrant rejects admin:all unless the caller is a superadmin or org admin.
+func (s *Service) checkAdminAllGrant(ctx context.Context, userID string, scopes []string) error {
+	if !scopesContainAdminAll(scopes) {
+		return nil
+	}
+	allowed, err := s.repo.CanGrantAdminAll(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return errAdminAllScopeDenied
+	}
+	return nil
+}
+
 // Create creates a new API token
 func (s *Service) Create(ctx context.Context, projectID, userID, name string, scopes []string) (*CreateApiTokenResponseDTO, error) {
 	// Validate scopes
@@ -87,6 +117,11 @@ func (s *Service) Create(ctx context.Context, projectID, userID, name string, sc
 		if !valid {
 			return nil, apperror.ErrBadRequest.WithMessage("invalid scope: " + scope)
 		}
+	}
+
+	// admin:all requires org admin or superadmin privileges
+	if err := s.checkAdminAllGrant(ctx, userID, scopes); err != nil {
+		return nil, err
 	}
 
 	// Viewers may only create read-only tokens
@@ -259,6 +294,11 @@ func (s *Service) CreateAccountToken(ctx context.Context, userID, name string, s
 		if !valid {
 			return nil, apperror.ErrBadRequest.WithMessage("invalid scope: " + scope)
 		}
+	}
+
+	// admin:all requires org admin or superadmin privileges
+	if err := s.checkAdminAllGrant(ctx, userID, scopes); err != nil {
+		return nil, err
 	}
 
 	// Check for duplicate name (among active account tokens for this user)
@@ -458,6 +498,11 @@ func (s *Service) UpdateScopes(ctx context.Context, tokenID, projectID, userID s
 		}
 	}
 
+	// admin:all requires org admin or superadmin privileges
+	if err := s.checkAdminAllGrant(ctx, userID, scopes); err != nil {
+		return nil, err
+	}
+
 	// Viewers may only set read-only scopes
 	if userID != "" && projectID != "" {
 		role, err := s.repo.GetUserProjectRole(ctx, projectID, userID)
@@ -511,6 +556,11 @@ func (s *Service) UpdateAccountTokenScopes(ctx context.Context, tokenID, userID 
 		if !valid {
 			return nil, apperror.ErrBadRequest.WithMessage("invalid scope: " + scope)
 		}
+	}
+
+	// admin:all requires org admin or superadmin privileges
+	if err := s.checkAdminAllGrant(ctx, userID, scopes); err != nil {
+		return nil, err
 	}
 
 	updated, err := s.repo.UpdateScopesByUser(ctx, tokenID, userID, scopes)

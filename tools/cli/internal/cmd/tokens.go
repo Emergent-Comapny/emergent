@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/emergent-company/emergent.memory/apps/server/pkg/sdk/apitokens"
+	"github.com/emergent-company/emergent.memory/tools/cli/internal/client"
 	"github.com/spf13/cobra"
 )
 
@@ -48,6 +49,68 @@ func resolveTokenIDForAccount(ctx context.Context, c *apitokens.Client, nameOrID
 	return "", fmt.Errorf("no active account token named %q found", nameOrID)
 }
 
+// resolveTokenArgOrPick resolves a token ID from args[0], or, when args is
+// empty and stdin is a terminal, lists active tokens and shows an interactive
+// picker. account selects account-level vs project-scoped tokens. Returns the
+// resolved token ID and a display name.
+func resolveTokenArgOrPick(cmd *cobra.Command, c *client.Client, args []string, account bool, projectID string) (id, name string, err error) {
+	if len(args) > 0 && args[0] != "" {
+		var tokenID string
+		if account {
+			tokenID, err = resolveTokenIDForAccount(context.Background(), c.SDK.APITokens, args[0])
+		} else {
+			tokenID, err = resolveTokenIDForProject(context.Background(), c.SDK.APITokens, projectID, args[0])
+		}
+		if err != nil {
+			return "", "", err
+		}
+		return tokenID, args[0], nil
+	}
+
+	if isNonInteractive() {
+		return "", "", fmt.Errorf("token ID or name is required — pass one or run interactively to pick from a list")
+	}
+
+	var tokens []apitokens.APIToken
+	if account {
+		result, err := c.SDK.APITokens.ListAccountTokens(context.Background())
+		if err != nil {
+			return "", "", fmt.Errorf("failed to list account tokens: %w", err)
+		}
+		tokens = result.Tokens
+	} else {
+		result, err := c.SDK.APITokens.List(context.Background(), projectID)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to list tokens: %w", err)
+		}
+		tokens = result.Tokens
+	}
+
+	items := make([]PickerItem, 0, len(tokens))
+	for _, t := range tokens {
+		if t.RevokedAt != nil {
+			continue
+		}
+		label := t.Name
+		if t.Prefix != "" {
+			label = t.Name + "  " + t.Prefix
+		}
+		items = append(items, PickerItem{ID: t.ID, Name: label})
+	}
+	if len(items) == 0 {
+		return "", "", fmt.Errorf("no active tokens found")
+	}
+
+	pickedID, pickedName, err := promptResourcePicker("Select a token", items)
+	if err != nil {
+		return "", "", err
+	}
+	if pickedID == "" {
+		return "", "", fmt.Errorf("token ID is required")
+	}
+	return pickedID, pickedName, nil
+}
+
 var tokensCmd = &cobra.Command{
 	Use:     "tokens",
 	Short:   "Manage API tokens",
@@ -80,7 +143,8 @@ On success, prints the full plaintext Token value prominently (this is the only
 time the full token is shown — save it immediately), followed by ID, Name, Type,
 Prefix, Scopes, and Created timestamp.
 
-Valid scopes: schema:read, data:read, data:write, agents:read, agents:write, projects:read, projects:write`,
+Valid scopes: schema:read, data:read, data:write, agents:read, agents:write, projects:read, projects:write.
+Scopes are comma-separated. Use --scopes all to grant full admin access (admin:all).`,
 	RunE: runCreateToken,
 }
 
@@ -91,7 +155,7 @@ var getTokenCmd = &cobra.Command{
 
 Use --project to specify a project-scoped token; without it, looks up an
 account-level token.`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: runGetToken,
 }
 
@@ -99,7 +163,7 @@ var revokeTokenCmd = &cobra.Command{
 	Use:   "revoke [token-id]",
 	Short: "Revoke an API token",
 	Long:  "Permanently revoke an API token, making it unusable. Without --project, revokes an account-level token.",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MaximumNArgs(1),
 	RunE:  runRevokeToken,
 }
 
@@ -111,7 +175,7 @@ var regenerateTokenCmd = &cobra.Command{
 Without --project, regenerates an account-level token. With --project, regenerates a project-scoped token.
 
 The new plaintext token value is printed once — save it immediately.`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: runRegenerateToken,
 }
 
@@ -187,7 +251,7 @@ Example:
 var (
 	tokenProjectID    string
 	tokenName         string
-	tokenScopes       string
+	tokenScopes       []string
 	tokenListLimit    int
 	tokenListPage     int
 	tokenNamePrefix   string
@@ -320,19 +384,26 @@ func runListTokens(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// normalizeTokenScopes resolves the raw --scopes flag values into the scopes
+// sent to the API. Empty input defaults to data:read; the sentinel "all"
+// expands to full admin access (admin:all).
+func normalizeTokenScopes(scopes []string) []string {
+	if len(scopes) == 0 {
+		return []string{"data:read"}
+	}
+	if len(scopes) == 1 && scopes[0] == "all" {
+		return []string{"admin:all"}
+	}
+	return scopes
+}
+
 func runCreateToken(cmd *cobra.Command, args []string) error {
 	if tokenName == "" {
 		return fmt.Errorf("token name is required. Use --name flag")
 	}
 
 	// Parse scopes
-	scopes := []string{"data:read"}
-	if tokenScopes != "" {
-		scopes = strings.Split(tokenScopes, ",")
-		for i := range scopes {
-			scopes[i] = strings.TrimSpace(scopes[i])
-		}
-	}
+	scopes := normalizeTokenScopes(tokenScopes)
 
 	req := &apitokens.CreateTokenRequest{
 		Name:   tokenName,
@@ -402,20 +473,34 @@ func runCreateToken(cmd *cobra.Command, args []string) error {
 }
 
 func runGetToken(cmd *cobra.Command, args []string) error {
-	nameOrID := args[0]
+	account := tokenProjectID == ""
+
+	var c *client.Client
+	var err error
+	if account {
+		c, err = getAccountClient(cmd)
+	} else {
+		c, err = getClient(cmd)
+	}
+	if err != nil {
+		return err
+	}
+
+	projectID := ""
+	if !account {
+		projectID, err = resolveProjectContext(cmd, tokenProjectID)
+		if err != nil {
+			return err
+		}
+	}
+
+	tokenID, _, err := resolveTokenArgOrPick(cmd, c, args, account, projectID)
+	if err != nil {
+		return err
+	}
 
 	// If --project not provided, look up an account-level token
-	if tokenProjectID == "" {
-		c, err := getAccountClient(cmd)
-		if err != nil {
-			return err
-		}
-
-		tokenID, err := resolveTokenIDForAccount(context.Background(), c.SDK.APITokens, nameOrID)
-		if err != nil {
-			return err
-		}
-
+	if account {
 		token, err := c.SDK.APITokens.GetAccountToken(context.Background(), tokenID)
 		if err != nil {
 			return fmt.Errorf("failed to get account token: %w", err)
@@ -440,21 +525,6 @@ func runGetToken(cmd *cobra.Command, args []string) error {
 	}
 
 	// --project provided: look up a project-scoped token
-	c, err := getClient(cmd)
-	if err != nil {
-		return err
-	}
-
-	projectID, err := resolveProjectContext(cmd, tokenProjectID)
-	if err != nil {
-		return err
-	}
-
-	tokenID, err := resolveTokenIDForProject(context.Background(), c.SDK.APITokens, projectID, nameOrID)
-	if err != nil {
-		return err
-	}
-
 	token, err := c.SDK.APITokens.Get(context.Background(), projectID, tokenID)
 	if err != nil {
 		return fmt.Errorf("failed to get token: %w", err)
@@ -480,20 +550,34 @@ func runGetToken(cmd *cobra.Command, args []string) error {
 }
 
 func runRegenerateToken(cmd *cobra.Command, args []string) error {
-	nameOrID := args[0]
+	account := tokenProjectID == ""
 
-	if tokenProjectID == "" {
+	var c *client.Client
+	var err error
+	if account {
+		c, err = getAccountClient(cmd)
+	} else {
+		c, err = getClient(cmd)
+	}
+	if err != nil {
+		return err
+	}
+
+	projectID := ""
+	if !account {
+		projectID, err = resolveProjectContext(cmd, tokenProjectID)
+		if err != nil {
+			return err
+		}
+	}
+
+	tokenID, _, err := resolveTokenArgOrPick(cmd, c, args, account, projectID)
+	if err != nil {
+		return err
+	}
+
+	if account {
 		// Account-level token
-		c, err := getAccountClient(cmd)
-		if err != nil {
-			return err
-		}
-
-		tokenID, err := resolveTokenIDForAccount(context.Background(), c.SDK.APITokens, nameOrID)
-		if err != nil {
-			return err
-		}
-
 		result, err := c.SDK.APITokens.RegenerateAccountToken(context.Background(), tokenID)
 		if err != nil {
 			return fmt.Errorf("failed to regenerate account token: %w", err)
@@ -515,21 +599,6 @@ func runRegenerateToken(cmd *cobra.Command, args []string) error {
 	}
 
 	// Project-scoped token
-	c, err := getClient(cmd)
-	if err != nil {
-		return err
-	}
-
-	projectID, err := resolveProjectContext(cmd, tokenProjectID)
-	if err != nil {
-		return err
-	}
-
-	tokenID, err := resolveTokenIDForProject(context.Background(), c.SDK.APITokens, projectID, nameOrID)
-	if err != nil {
-		return err
-	}
-
 	result, err := c.SDK.APITokens.Regenerate(context.Background(), projectID, tokenID)
 	if err != nil {
 		return fmt.Errorf("failed to regenerate token: %w", err)
@@ -552,51 +621,50 @@ func runRegenerateToken(cmd *cobra.Command, args []string) error {
 }
 
 func runRevokeToken(cmd *cobra.Command, args []string) error {
-	nameOrID := args[0]
+	account := tokenProjectID == ""
+
+	var c *client.Client
+	var err error
+	if account {
+		c, err = getAccountClient(cmd)
+	} else {
+		c, err = getClient(cmd)
+	}
+	if err != nil {
+		return err
+	}
+
+	projectID := ""
+	if !account {
+		projectID, err = resolveProjectContext(cmd, tokenProjectID)
+		if err != nil {
+			return err
+		}
+	}
+
+	tokenID, tokenName, err := resolveTokenArgOrPick(cmd, c, args, account, projectID)
+	if err != nil {
+		return err
+	}
 
 	// If --project not provided, revoke an account-level token
-	if tokenProjectID == "" {
-		c, err := getAccountClient(cmd)
-		if err != nil {
-			return err
-		}
-
-		tokenID, err := resolveTokenIDForAccount(context.Background(), c.SDK.APITokens, nameOrID)
-		if err != nil {
-			return err
-		}
-
+	if account {
 		err = c.SDK.APITokens.RevokeAccountToken(context.Background(), tokenID)
 		if err != nil {
 			return fmt.Errorf("failed to revoke account token: %w", err)
 		}
 
-		fmt.Printf("Account token %s has been revoked successfully.\n", nameOrID)
+		fmt.Printf("Account token %s has been revoked successfully.\n", tokenName)
 		return nil
 	}
 
 	// --project provided: revoke a project-scoped token
-	c, err := getClient(cmd)
-	if err != nil {
-		return err
-	}
-
-	projectID, err := resolveProjectContext(cmd, tokenProjectID)
-	if err != nil {
-		return err
-	}
-
-	tokenID, err := resolveTokenIDForProject(context.Background(), c.SDK.APITokens, projectID, nameOrID)
-	if err != nil {
-		return err
-	}
-
 	err = c.SDK.APITokens.Revoke(context.Background(), projectID, tokenID)
 	if err != nil {
 		return fmt.Errorf("failed to revoke token: %w", err)
 	}
 
-	fmt.Printf("Token %s has been revoked successfully.\n", nameOrID)
+	fmt.Printf("Token %s has been revoked successfully.\n", tokenName)
 
 	return nil
 }
@@ -612,7 +680,7 @@ func init() {
 
 	// Create token flags
 	createTokenCmd.Flags().StringVar(&tokenName, "name", "", "Token name (required)")
-	createTokenCmd.Flags().StringVar(&tokenScopes, "scopes", "", "Comma-separated scopes (default: data:read). Valid: schema:read, data:read, data:write, agents:read, agents:write, projects:read, projects:write")
+	createTokenCmd.Flags().StringSliceVar(&tokenScopes, "scopes", nil, "Comma-separated scopes (e.g. --scopes data:read,data:write). Use --scopes all for full admin access.")
 	_ = createTokenCmd.MarkFlagRequired("name")
 
 	// Cleanup flags

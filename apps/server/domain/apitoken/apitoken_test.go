@@ -304,6 +304,7 @@ func TestValidApiTokenScopes(t *testing.T) {
 		"skills:read", "skills:write",
 		"documents:read", "documents:write",
 		"admin",
+		"admin:all",
 	}
 	if len(ValidApiTokenScopes) != len(expected) {
 		t.Errorf("ValidApiTokenScopes has %d items, want %d", len(ValidApiTokenScopes), len(expected))
@@ -312,5 +313,26 @@ func TestValidApiTokenScopes(t *testing.T) {
 		if ValidApiTokenScopes[i] != scope {
 			t.Errorf("ValidApiTokenScopes[%d] = %q, want %q", i, ValidApiTokenScopes[i], scope)
 		}
+	}
+}
+
+func TestScopesContainAdminAll(t *testing.T) {
+	tests := []struct {
+		name   string
+		scopes []string
+		want   bool
+	}{
+		{"admin all alone", []string{"admin:all"}, true},
+		{"admin all in mixed list", []string{"data:read", "admin:all", "graph:write"}, true},
+		{"bare admin without admin all", []string{"admin", "data:read"}, false},
+		{"unrelated scopes", []string{"data:read", "graph:write"}, false},
+		{"empty list", []string{}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := scopesContainAdminAll(tt.scopes); got != tt.want {
+				t.Errorf("scopesContainAdminAll(%v) = %v, want %v", tt.scopes, got, tt.want)
+			}
+		})
 	}
 }

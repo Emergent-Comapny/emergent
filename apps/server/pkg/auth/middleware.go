@@ -309,8 +309,6 @@ var scopeImplies = map[string][]string{
 	},
 	"projects:write": {
 		"projects:read",
-		// MCP fine-grained
-		"admin",
 	},
 	// MCP fine-grained umbrella scopes
 	"graph:write": {
@@ -327,6 +325,30 @@ var scopeImplies = map[string][]string{
 	},
 	"documents:write": {
 		"documents:read",
+	},
+	"admin:all": {
+		"admin", "admin:read", "admin:write",
+		"agents:read", "agents:write",
+		"branches:read", "branches:write",
+		"chat:admin", "chat:use",
+		"chunks:read", "chunks:write",
+		"data:read", "data:write",
+		"discovery:read", "discovery:write",
+		"documents:delete", "documents:read", "documents:write",
+		"extraction:read", "extraction:write",
+		"graph:read", "graph:search:debug", "graph:search:read", "graph:write",
+		"ingest:write",
+		"journal:read", "journal:write",
+		"mcp:admin",
+		"notifications:read", "notifications:write",
+		"org:invite:create", "org:project:create", "org:project:delete", "org:read",
+		"project:invite:create", "project:read",
+		"projects:read", "projects:write",
+		"schema:migrate", "schema:read", "schema:write",
+		"search", "search:debug", "search:read",
+		"skills:read", "skills:write",
+		"tasks:read", "tasks:write",
+		"user-activity:read", "user-activity:write",
 	},
 }
 

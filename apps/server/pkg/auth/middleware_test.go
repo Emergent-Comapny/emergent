@@ -350,6 +350,31 @@ func TestRequireAPITokenScopes_ProjectsWrite_ImpliesRead(t *testing.T) {
 	}
 }
 
+func TestExpandScopes_AdminAll(t *testing.T) {
+	got := expandScopes([]string{"admin:all"})
+
+	want := []string{
+		"admin:read", "admin:write", "chat:admin", "mcp:admin",
+		"data:read", "data:write", "projects:write", "documents:delete",
+	}
+	for _, scope := range want {
+		if !got[scope] {
+			t.Errorf("expandScopes([\"admin:all\"]) missing %q", scope)
+		}
+	}
+}
+
+func TestExpandScopes_ProjectsWrite_NoAdminImplication(t *testing.T) {
+	got := expandScopes([]string{"projects:write"})
+
+	if got["admin"] {
+		t.Error(`expandScopes(["projects:write"]) must not contain "admin"`)
+	}
+	if !got["projects:read"] {
+		t.Error(`expandScopes(["projects:write"]) missing "projects:read"`)
+	}
+}
+
 func TestRequireAPITokenScopes_OAuthSession_BypassesCheck(t *testing.T) {
 	m := &Middleware{}
 
