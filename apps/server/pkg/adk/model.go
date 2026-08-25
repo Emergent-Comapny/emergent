@@ -87,7 +87,26 @@ func (f *ModelFactory) CreateModel(ctx context.Context) (model.LLM, error) {
 			return nil, fmt.Errorf("model resolver error for project %s: %w", projectID, err)
 		}
 		if resolved == "" {
-			return nil, fmt.Errorf("no generative model configured for project %s — set a model via the project model-config API", projectID)
+			// Fall back to the provider credential's generative model (set via
+			// 'memory provider configure-project <provider> --generative-model <model>').
+			// This lets chat/agents work without a separate 'projects set-models' step.
+			if f.resolver != nil {
+				if cred, _ := f.resolver.ResolveAny(ctx); cred != nil && cred.GenerativeModel != "" {
+					gen := cred.GenerativeModel
+					if _, bare, ok := strings.Cut(gen, "/"); ok {
+						gen = bare
+					}
+					name := cred.Provider + "/" + gen
+					f.log.Debug("resolved generative model from provider config fallback",
+						slog.String("model", name),
+						slog.String("provider", cred.Provider),
+						slog.String("source", cred.Source),
+						slog.String("projectID", projectID),
+					)
+					return f.CreateModelWithName(ctx, name)
+				}
+			}
+			return nil, fmt.Errorf("no generative model configured for project %s — set a model via 'memory projects set-models --generative provider/model' or 'memory provider configure-project <provider> --generative-model <model>'", projectID)
 		}
 		f.log.Debug("resolved generative model",
 			slog.String("model", resolved),

@@ -35,6 +35,11 @@ import (
 	"github.com/emergent-company/emergent.memory/pkg/tracing"
 )
 
+// errNoProviderMsg is the user-facing message returned when no LLM provider
+// is configured. It lists all supported providers, not just Google/Vertex.
+const errNoProviderMsg = "No LLM provider configured for this project. " +
+	"Please configure a Google AI, Vertex AI, OpenAI, or DeepSeek credential in your project settings."
+
 // Handler handles chat HTTP requests
 type Handler struct {
 	svc              *Service
@@ -520,9 +525,7 @@ func (h *Handler) StreamChat(c echo.Context) error {
 				strings.Contains(errMsg, "no_provider") ||
 				strings.Contains(errMsg, "provider config found for organization") ||
 				strings.Contains(errMsg, "no generative model configured") {
-				return apperror.New(http.StatusServiceUnavailable, "no_provider",
-					"No LLM provider configured for this project. "+
-						"Please configure a Google AI or Vertex AI credential in your project settings.")
+				return apperror.New(http.StatusServiceUnavailable, "no_provider", errNoProviderMsg)
 			}
 			return apperror.New(http.StatusServiceUnavailable, "provider_error",
 				friendlyProviderError(probeErr))
@@ -843,23 +846,23 @@ func friendlyProviderError(err error) string {
 	case strings.Contains(msg, "API_KEY_INVALID"),
 		strings.Contains(msg, "API key expired"),
 		strings.Contains(msg, "API key not valid"):
-		return "The configured Google AI API key is invalid or has expired. " +
-			"Update it with: memory provider configure google --api-key <new-key>"
+		return "The configured LLM API key is invalid or has expired. " +
+			"Update it with: memory provider configure-project <provider> --api-key <new-key>"
 	case strings.Contains(msg, "RESOURCE_EXHAUSTED"),
 		strings.Contains(msg, "quota"):
-		return "Google AI quota exceeded. Check your quota limits or switch to a different model."
+		return "LLM quota exceeded. Check your quota limits or switch to a different model."
 	case strings.Contains(msg, "PERMISSION_DENIED"):
-		return "Permission denied by Google AI. Verify that the API key has access to the Generative Language API."
+		return "Permission denied by the LLM provider. Verify that the API key has access to the model API."
 	case strings.Contains(msg, "no LLM provider"), strings.Contains(msg, "no_provider"):
 		return "No LLM provider is configured for this project. " +
-			"Run: memory provider configure google --api-key <key>"
+			"Run: memory provider configure-project <provider> --api-key <key>"
 	case strings.Contains(msg, "credential resolution failed"),
 		strings.Contains(msg, "encryption not configured"),
 		strings.Contains(msg, "failed to decrypt"),
 		strings.Contains(msg, "EncryptionNonce"):
 		return "LLM provider credentials could not be decrypted. " +
 			"The server encryption key may have changed. " +
-			"Re-configure with: memory provider configure google --api-key <key>"
+			"Re-configure with: memory provider configure-project <provider> --api-key <key>"
 	default:
 		return "Agent execution failed: " + msg
 	}
@@ -1210,9 +1213,7 @@ func (h *Handler) QueryStream(c echo.Context) error {
 				strings.Contains(errMsg, "no_provider") ||
 				strings.Contains(errMsg, "provider config found for organization") ||
 				strings.Contains(errMsg, "no generative model configured") {
-				return apperror.New(http.StatusServiceUnavailable, "no_provider",
-					"No LLM provider configured for this project. "+
-						"Please configure a Google AI or Vertex AI credential in your project settings.")
+				return apperror.New(http.StatusServiceUnavailable, "no_provider", errNoProviderMsg)
 			}
 			return apperror.New(http.StatusServiceUnavailable, "provider_error",
 				friendlyProviderError(probeErr))
@@ -1389,9 +1390,7 @@ func (h *Handler) AskStream(c echo.Context) error {
 				strings.Contains(errMsg, "no_provider") ||
 				strings.Contains(errMsg, "provider config found for organization") ||
 				strings.Contains(errMsg, "no generative model configured") {
-				return apperror.New(http.StatusServiceUnavailable, "no_provider",
-					"No LLM provider configured for this project. "+
-						"Please configure a Google AI or Vertex AI credential in your project settings.")
+				return apperror.New(http.StatusServiceUnavailable, "no_provider", errNoProviderMsg)
 			}
 			return apperror.New(http.StatusServiceUnavailable, "provider_error",
 				friendlyProviderError(probeErr))
@@ -1570,9 +1569,7 @@ func (h *Handler) RememberStream(c echo.Context) error {
 
 	// Probe LLM provider before opening SSE stream.
 	if h.modelFactory == nil {
-		return apperror.New(http.StatusServiceUnavailable, "no_provider",
-			"No LLM provider configured for this project. "+
-				"Please configure a Google AI or Vertex AI credential in your project settings.")
+		return apperror.New(http.StatusServiceUnavailable, "no_provider", errNoProviderMsg)
 	}
 	if h.modelFactory != nil {
 		probeModel, probeErr := h.modelFactory.CreateModel(ctx)
@@ -1582,9 +1579,7 @@ func (h *Handler) RememberStream(c echo.Context) error {
 				strings.Contains(errMsg, "no_provider") ||
 				strings.Contains(errMsg, "provider config found for organization") ||
 				strings.Contains(errMsg, "no generative model configured") {
-				return apperror.New(http.StatusServiceUnavailable, "no_provider",
-					"No LLM provider configured for this project. "+
-						"Please configure a Google AI or Vertex AI credential in your project settings.")
+				return apperror.New(http.StatusServiceUnavailable, "no_provider", errNoProviderMsg)
 			}
 			return apperror.New(http.StatusServiceUnavailable, "provider_error",
 				friendlyProviderError(probeErr))
@@ -1991,9 +1986,7 @@ func (h *Handler) RememberFile(c echo.Context) error {
 
 	// Probe LLM provider before doing expensive upload work.
 	if h.modelFactory == nil {
-		return apperror.New(http.StatusServiceUnavailable, "no_provider",
-			"No LLM provider configured for this project. "+
-				"Please configure a Google AI or Vertex AI credential in your project settings.")
+		return apperror.New(http.StatusServiceUnavailable, "no_provider", errNoProviderMsg)
 	}
 	probeModel, probeErr := h.modelFactory.CreateModel(ctx)
 	if probeErr != nil {
@@ -2002,9 +1995,7 @@ func (h *Handler) RememberFile(c echo.Context) error {
 			strings.Contains(errMsg, "no_provider") ||
 			strings.Contains(errMsg, "provider config found for organization") ||
 			strings.Contains(errMsg, "no generative model configured") {
-			return apperror.New(http.StatusServiceUnavailable, "no_provider",
-				"No LLM provider configured for this project. "+
-					"Please configure a Google AI or Vertex AI credential in your project settings.")
+			return apperror.New(http.StatusServiceUnavailable, "no_provider", errNoProviderMsg)
 		}
 		return apperror.New(http.StatusServiceUnavailable, "provider_error",
 			friendlyProviderError(probeErr))

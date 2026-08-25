@@ -392,3 +392,55 @@ func TestModelFactoryExtractionGenerateConfigWithSchema_SchemaWithEnumConstraint
 		t.Errorf("type.Enum length = %d, want 3", len(typeSchema.Enum))
 	}
 }
+
+// stubCredentialResolver is a minimal adk.CredentialResolver for tests.
+type stubCredentialResolver struct {
+	cred *ResolvedCredential
+}
+
+func (s *stubCredentialResolver) ResolveAny(_ context.Context) (*ResolvedCredential, error) {
+	return s.cred, nil
+}
+
+func (s *stubCredentialResolver) ResolveFor(_ context.Context, _ string) (*ResolvedCredential, error) {
+	return s.cred, nil
+}
+
+// stubModelResolver returns a fixed (model, source) pair.
+type stubModelResolver struct {
+	model  string
+	source string
+}
+
+func (s *stubModelResolver) ResolveGenerativeModelByID(_ context.Context, _ string) (string, string, error) {
+	return s.model, s.source, nil
+}
+
+func TestModelFactoryCreateModel_FallsBackToProviderConfig(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	cfg := &config.LLMConfig{}
+
+	cred := &ResolvedCredential{
+		Provider:        "deepseek",
+		GenerativeModel: "deepseek-v4-flash",
+		BaseURL:         "https://api.deepseek.com/v1",
+		APIKey:          "test-key",
+		Source:          "project",
+	}
+
+	factory := NewModelFactory(cfg, log,
+		&stubCredentialResolver{cred: cred},
+		nil,
+		&stubModelResolver{model: "", source: ""},
+	)
+
+	ctx := WithProjectID(context.Background(), "00000000-0000-0000-0000-000000000000")
+
+	llm, err := factory.CreateModel(ctx)
+	if err != nil {
+		t.Fatalf("CreateModel() unexpected error: %v", err)
+	}
+	if llm == nil {
+		t.Fatal("CreateModel() returned nil model")
+	}
+}
