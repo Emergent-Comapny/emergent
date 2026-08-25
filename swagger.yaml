@@ -1,5 +1,229 @@
 basePath: /
 definitions:
+  domain_agentcompat.APIError:
+    properties:
+      error:
+        $ref: '#/definitions/domain_agentcompat.APIErrorDetail'
+    type: object
+  domain_agentcompat.APIErrorDetail:
+    properties:
+      code:
+        type: string
+      message:
+        type: string
+      param:
+        type: string
+      type:
+        type: string
+    type: object
+  domain_agentcompat.ChatCompletionRequest:
+    properties:
+      frequency_penalty:
+        type: number
+      max_completion_tokens:
+        type: integer
+      max_tokens:
+        type: integer
+      messages:
+        items:
+          $ref: '#/definitions/domain_agentcompat.ChatMessage'
+        type: array
+      metadata:
+        additionalProperties:
+          type: string
+        description: Metadata is stored as run trigger_metadata.
+        type: object
+      model:
+        description: 'Model selects the agent: "agent:<name>" or bare "<name>".'
+        type: string
+      parallel_tool_calls:
+        type: boolean
+      presence_penalty:
+        type: number
+      reasoning_effort:
+        type: string
+      response_format:
+        allOf:
+        - $ref: '#/definitions/domain_agentcompat.ResponseFormat'
+        description: ResponseFormat lets the client request JSON output.
+      seed:
+        type: integer
+      stop:
+        items:
+          type: string
+        type: array
+      stream:
+        description: Streaming.
+        type: boolean
+      stream_options:
+        $ref: '#/definitions/domain_agentcompat.StreamOptions'
+      system_fingerprint:
+        description: |-
+          SystemFingerprint is overloaded as a run-resume token.
+          When the server pauses an agent run waiting for client tool execution
+          it sets SystemFingerprint = "run_<runID>". The client must echo this
+          value back in the next request to resume the same run.
+        type: string
+      temperature:
+        description: LLM sampling params — passed through to the underlying model.
+        type: number
+      tool_choice:
+        items:
+          type: integer
+        type: array
+      tools:
+        description: |-
+          Client-supplied tools. When present the agent can call these and the
+          response will include tool_calls for the client to execute.
+          Internal (memory_*) tools are always available alongside these.
+        items:
+          $ref: '#/definitions/domain_agentcompat.ClientToolDef'
+        type: array
+      top_p:
+        type: number
+      user:
+        description: User is an opaque identifier for abuse-detection, forwarded to
+          the run.
+        type: string
+    type: object
+  domain_agentcompat.ChatCompletionResponse:
+    properties:
+      choices:
+        items:
+          $ref: '#/definitions/domain_agentcompat.Choice'
+        type: array
+      created:
+        description: unix seconds
+        type: integer
+      id:
+        type: string
+      model:
+        type: string
+      object:
+        description: '"chat.completion"'
+        type: string
+      system_fingerprint:
+        type: string
+      usage:
+        $ref: '#/definitions/domain_agentcompat.Usage'
+    type: object
+  domain_agentcompat.ChatMessage:
+    properties:
+      content:
+        type: string
+      name:
+        type: string
+      role:
+        description: system | user | assistant | tool
+        type: string
+      tool_call_id:
+        description: Tool result sent by the caller in a follow-up request.
+        type: string
+      tool_calls:
+        description: Tool calls produced by the assistant (finish_reason == "tool_calls").
+        items:
+          $ref: '#/definitions/domain_agentcompat.ToolCall'
+        type: array
+    type: object
+  domain_agentcompat.Choice:
+    properties:
+      finish_reason:
+        description: '"stop" | "tool_calls" | "length"'
+        type: string
+      index:
+        type: integer
+      message:
+        $ref: '#/definitions/domain_agentcompat.ChatMessage'
+    type: object
+  domain_agentcompat.ClientToolDef:
+    properties:
+      function:
+        $ref: '#/definitions/domain_agentcompat.FunctionDef'
+      type:
+        description: '"function"'
+        type: string
+    type: object
+  domain_agentcompat.FunctionCall:
+    properties:
+      arguments:
+        description: JSON string
+        type: string
+      name:
+        type: string
+    type: object
+  domain_agentcompat.FunctionDef:
+    properties:
+      description:
+        type: string
+      name:
+        type: string
+      parameters:
+        description: JSON Schema object
+        items:
+          type: integer
+        type: array
+      strict:
+        type: boolean
+    type: object
+  domain_agentcompat.Model:
+    properties:
+      created:
+        description: unix seconds (agent createdAt)
+        type: integer
+      id:
+        description: '"agent:<name>"'
+        type: string
+      object:
+        description: '"model"'
+        type: string
+      owned_by:
+        type: string
+    type: object
+  domain_agentcompat.ModelList:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/domain_agentcompat.Model'
+        type: array
+      object:
+        description: '"list"'
+        type: string
+    type: object
+  domain_agentcompat.ResponseFormat:
+    properties:
+      json_schema:
+        description: when type=="json_schema"
+        items:
+          type: integer
+        type: array
+      type:
+        description: '"text" | "json_object" | "json_schema"'
+        type: string
+    type: object
+  domain_agentcompat.StreamOptions:
+    properties:
+      include_usage:
+        type: boolean
+    type: object
+  domain_agentcompat.ToolCall:
+    properties:
+      function:
+        $ref: '#/definitions/domain_agentcompat.FunctionCall'
+      id:
+        type: string
+      type:
+        description: '"function"'
+        type: string
+    type: object
+  domain_agentcompat.Usage:
+    properties:
+      completion_tokens:
+        type: integer
+      prompt_tokens:
+        type: integer
+      total_tokens:
+        type: integer
+    type: object
   domain_agents.ACPSSEEvent:
     properties:
       created_at:
@@ -417,6 +641,15 @@ definitions:
       RunStatusCancelling: 'ACP two-step cancel: intent acknowledged, awaiting execution
         stop'
       RunStatusQueued: enqueued, waiting for a worker
+    x-enum-descriptions:
+    - enqueued, waiting for a worker
+    - ""
+    - ""
+    - ""
+    - ""
+    - ""
+    - ""
+    - 'ACP two-step cancel: intent acknowledged, awaiting execution stop'
     x-enum-varnames:
     - RunStatusQueued
     - RunStatusRunning
@@ -622,6 +855,11 @@ definitions:
       SessionStatusCompleted: Run finished successfully
       SessionStatusError: Run or provisioning failed
       SessionStatusProvisioning: Workspace being set up
+    x-enum-descriptions:
+    - Workspace being set up
+    - Workspace ready, agent executing
+    - Run finished successfully
+    - Run or provisioning failed
     x-enum-varnames:
     - SessionStatusProvisioning
     - SessionStatusActive
@@ -1280,6 +1518,11 @@ definitions:
     type: object
   domain_discoveryjobs.FinalizeDiscoveryRequest:
     properties:
+      documentId:
+        description: |-
+          DocumentID is used by enrich and create_rich modes to load document text
+          for server-side schema property generation.
+        type: string
       existingPackId:
         type: string
       includedRelationships:
@@ -1289,19 +1532,20 @@ definitions:
       includedTypes:
         items:
           $ref: '#/definitions/domain_discoveryjobs.IncludedType'
-        minItems: 1
         type: array
       mode:
         enum:
         - create
         - extend
+        - enrich
+        - create_rich
+        - create_rich_combined
+        - create_rich_sequential
         type: string
       packName:
         type: string
     required:
-    - includedTypes
     - mode
-    - packName
     type: object
   domain_discoveryjobs.FinalizeDiscoveryResponse:
     properties:
@@ -1739,6 +1983,57 @@ definitions:
           type: string
         type: array
     type: object
+  domain_extraction.ChunkEmbeddingQueueStats:
+    properties:
+      completed:
+        type: integer
+      failed:
+        type: integer
+      pending:
+        type: integer
+      processing:
+        type: integer
+    type: object
+  domain_extraction.GraphEmbeddingQueueStats:
+    properties:
+      completed:
+        type: integer
+      deadLetter:
+        type: integer
+      failed:
+        type: integer
+      pending:
+        type: integer
+      processing:
+        type: integer
+    type: object
+  domain_extraction.ProjectEmbeddingCancelResponse:
+    properties:
+      chunks_cancelled:
+        type: integer
+      message:
+        type: string
+      objects_cancelled:
+        type: integer
+    type: object
+  domain_extraction.ProjectEmbeddingProgressResponse:
+    properties:
+      chunks:
+        $ref: '#/definitions/domain_extraction.ChunkEmbeddingQueueStats'
+      objects:
+        $ref: '#/definitions/domain_extraction.GraphEmbeddingQueueStats'
+      relationships:
+        $ref: '#/definitions/domain_extraction.GraphEmbeddingQueueStats'
+    type: object
+  domain_extraction.ProjectEmbeddingRetriggerResponse:
+    properties:
+      chunks_reset:
+        type: integer
+      message:
+        type: string
+      objects_reset:
+        type: integer
+    type: object
   domain_graph.AnalyticsObjectItem:
     properties:
       access_count:
@@ -1768,15 +2063,33 @@ definitions:
   domain_graph.BranchMergeRequest:
     properties:
       conflict_strategy:
-        description: '"enrich" (default), "overwrite", "preserve_target", "block"'
+        description: |-
+          ConflictStrategy is the legacy field, used when Policy is empty.
+          "enrich" (default), "overwrite", "preserve_target", "block"
         type: string
       execute:
         type: boolean
       limit:
         description: Override enumeration limit (testing)
         type: integer
+      policy:
+        description: |-
+          Policy is a named preset that bundles similarity + conflict resolution behaviour.
+          Takes precedence over ConflictStrategy when non-empty.
+        type: string
+      similarity_threshold:
+        description: |-
+          SimilarityThreshold overrides the policy default (0–1). Values closer to 1 are stricter.
+          Only used when the resolved policy enables similarity.
+        type: number
       source_branch_id:
         type: string
+      wait_for_embeddings:
+        description: |-
+          WaitForEmbeddings returns an error instead of proceeding when the source branch
+          has objects that have not yet been embedded. Useful when the caller wants to ensure
+          full similarity coverage before merging.
+        type: boolean
     required:
     - source_branch_id
     type: object
@@ -2459,6 +2772,15 @@ definitions:
         type: number
     required:
     - query
+    type: object
+  domain_graph.MergeReadinessResponse:
+    properties:
+      pending_embeddings:
+        type: integer
+      ready:
+        type: boolean
+      total_objects:
+        type: integer
     type: object
   domain_graph.MostAccessedResponse:
     properties:
@@ -3342,12 +3664,10 @@ definitions:
   domain_modelconfig.ModelSource:
     enum:
     - project
-    - org
     - none
     type: string
     x-enum-varnames:
     - ModelSourceProject
-    - ModelSourceOrg
     - ModelSourceNone
   domain_modelconfig.UpsertModelConfigRequest:
     properties:
@@ -3773,6 +4093,8 @@ definitions:
         type: object
       auto_extract_objects:
         type: boolean
+      budget_usd:
+        type: number
       chat_prompt_template:
         type: string
       id:
@@ -3973,6 +4295,12 @@ definitions:
     - ProviderDeepSeek
   domain_provider.TestProjectProviderResponse:
     properties:
+      embeddingError:
+        type: string
+      embeddingModel:
+        type: string
+      embeddingOk:
+        type: boolean
       latencyMs:
         type: integer
       model:
@@ -3984,6 +4312,12 @@ definitions:
     type: object
   domain_provider.TestProviderResponse:
     properties:
+      embeddingError:
+        type: string
+      embeddingModel:
+        type: string
+      embeddingOk:
+        type: boolean
       latencyMs:
         type: integer
       model:
@@ -6583,6 +6917,10 @@ definitions:
       RepoSourceFixed: Use a fixed repo URL from config
       RepoSourceNone: Empty workspace, no repo checkout
       RepoSourceTaskContext: Use repo URL from task metadata
+    x-enum-descriptions:
+    - Use repo URL from task metadata
+    - Use a fixed repo URL from config
+    - Empty workspace, no repo checkout
     x-enum-varnames:
     - RepoSourceTaskContext
     - RepoSourceFixed
@@ -6626,7 +6964,7 @@ info:
   license:
     name: Proprietary
   title: Memory API
-  version: 0.41.121
+  version: 0.45.0
 paths:
   /.well-known/oauth-protected-resource:
     get:
@@ -8605,60 +8943,6 @@ paths:
       summary: Get source types
       tags:
       - documents
-  /api/documents/upload:
-    post:
-      consumes:
-      - multipart/form-data
-      description: Upload a file and create a document record (with automatic deduplication)
-      parameters:
-      - description: Project ID
-        in: header
-        name: X-Project-ID
-        required: true
-        type: string
-      - description: File to upload (max 100MB)
-        in: formData
-        name: file
-        required: true
-        type: file
-      - description: 'Source type (default: upload)'
-        in: formData
-        name: source_type
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Existing document returned (deduplicated)
-          schema:
-            additionalProperties: true
-            type: object
-        "201":
-          description: Document created
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
-        "413":
-          description: File too large (>100MB)
-          schema:
-            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
-        "503":
-          description: Storage service unavailable
-          schema:
-            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
-      security:
-      - bearerAuth: []
-      summary: Upload document
-      tags:
-      - documents
   /api/embeddings/config:
     patch:
       responses: {}
@@ -8892,6 +9176,31 @@ paths:
       summary: Create branch
       tags:
       - branches
+  /api/graph/branches/{branchId}/merge-readiness:
+    get:
+      description: Returns the count of source branch objects that have not yet been
+        embedded.
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Source branch ID
+        in: path
+        name: branchId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/domain_graph.MergeReadinessResponse'
+      summary: Check merge readiness
+      tags:
+      - graph
   /api/graph/branches/{id}:
     delete:
       consumes:
@@ -10198,6 +10507,11 @@ paths:
       - description: Sort order (asc/desc)
         in: query
         name: order
+        type: string
+      - description: Order by JSONB property path with optional direction (e.g. 'ds_score:desc';
+          default direction 'desc')
+        in: query
+        name: order_by
         type: string
       - description: Filter objects related to this ID
         in: query
@@ -12328,6 +12642,93 @@ paths:
       summary: Update project
       tags:
       - projects
+  /api/projects/{id}/embeddings/progress:
+    get:
+      description: Returns pending/processing/completed/failed counts for graph object,
+        relationship, and chunk embedding jobs scoped to this project. Requires project_admin
+        role.
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/domain_extraction.ProjectEmbeddingProgressResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
+      summary: Get embedding queue progress for a project
+      tags:
+      - embeddings
+  /api/projects/{id}/embeddings/queue:
+    delete:
+      description: Deletes all pending and processing embedding jobs (graph objects
+        and chunks) for this project. Effectively stops queued embeddings. Requires
+        project_admin role.
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/domain_extraction.ProjectEmbeddingCancelResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
+      summary: Cancel pending embedding jobs for a project
+      tags:
+      - embeddings
+  /api/projects/{id}/embeddings/retrigger:
+    post:
+      description: Resets all failed and dead_letter embedding jobs (graph objects
+        and chunks) for this project back to pending so they are retried. Requires
+        project_admin role.
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/domain_extraction.ProjectEmbeddingRetriggerResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
+      summary: Retrigger failed embedding jobs for a project
+      tags:
+      - embeddings
   /api/projects/{id}/members:
     get:
       description: Returns all users who are members of the specified project with
@@ -12551,6 +12952,52 @@ paths:
       summary: List questions for an agent run
       tags:
       - agent-questions
+  /api/projects/{projectId}/agent-runs/{runId}/remember-status:
+    get:
+      description: Returns the graph-mutation summary (objects created/updated/deleted,
+        relationships, discovered types, created/deleted ids) and completion state
+        of an async remember/forget run, following queue-reextraction jobs and embedding
+        readiness.
+      parameters:
+      - description: Project ID (UUID)
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Run ID (UUID)
+        in: path
+        name: runId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Remember-status result
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
+        "404":
+          description: Run not found
+          schema:
+            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
+      security:
+      - bearerAuth: []
+      summary: Get remember-status for a run
+      tags:
+      - agents
   /api/projects/{projectId}/agents/{id}/enable:
     post:
       consumes:
@@ -13066,6 +13513,54 @@ paths:
       security:
       - bearerAuth: []
       summary: Update API token scopes
+      tags:
+      - api-tokens
+  /api/projects/{projectId}/tokens/{tokenId}/regenerate:
+    post:
+      description: Atomically revokes an existing project API token and creates a
+        replacement with the same name and scopes. Returns the new plaintext token
+        value once.
+      parameters:
+      - description: Project ID (UUID)
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Token ID (UUID)
+        in: path
+        name: tokenId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: New token (includes full token value)
+          schema:
+            $ref: '#/definitions/domain_apitoken.CreateApiTokenResponseDTO'
+        "400":
+          description: Invalid project ID or token ID
+          schema:
+            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
+        "404":
+          description: Token not found
+          schema:
+            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
+        "409":
+          description: Token already revoked
+          schema:
+            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
+      security:
+      - bearerAuth: []
+      summary: Regenerate API token
       tags:
       - api-tokens
   /api/projects/current:
@@ -15673,6 +16168,49 @@ paths:
       summary: Update account API token scopes
       tags:
       - api-tokens
+  /api/tokens/{tokenId}/regenerate:
+    post:
+      description: Atomically revokes an existing account-level API token and creates
+        a replacement with the same name and scopes. Returns the new plaintext token
+        value once.
+      parameters:
+      - description: Token ID (UUID)
+        in: path
+        name: tokenId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: New token (includes full token value)
+          schema:
+            $ref: '#/definitions/domain_apitoken.CreateApiTokenResponseDTO'
+        "400":
+          description: Invalid token ID
+          schema:
+            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
+        "404":
+          description: Token not found
+          schema:
+            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
+        "409":
+          description: Token already revoked
+          schema:
+            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
+      security:
+      - bearerAuth: []
+      summary: Regenerate account API token
+      tags:
+      - api-tokens
   /api/user-activity/recent:
     delete:
       consumes:
@@ -17857,125 +18395,6 @@ paths:
           schema:
             $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
       summary: List project-level provider config overrides for an org
-  /organizations/{orgId}/providers:
-    get:
-      parameters:
-      - description: Organization ID
-        in: path
-        name: orgId
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/domain_provider.ProviderConfigResponse'
-            type: array
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
-      summary: List org-level provider configs
-  /organizations/{orgId}/providers/{provider}:
-    delete:
-      parameters:
-      - description: Organization ID
-        in: path
-        name: orgId
-        required: true
-        type: string
-      - description: Provider name
-        in: path
-        name: provider
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
-      summary: Delete org-level provider config
-    get:
-      parameters:
-      - description: Organization ID
-        in: path
-        name: orgId
-        required: true
-        type: string
-      - description: Provider name
-        in: path
-        name: provider
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/domain_provider.ProviderConfigResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
-      summary: Get org-level provider config
-    put:
-      parameters:
-      - description: Organization ID
-        in: path
-        name: orgId
-        required: true
-        type: string
-      - description: Provider name (google or google-vertex)
-        in: path
-        name: provider
-        required: true
-        type: string
-      - description: Provider config
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/domain_provider.UpsertProviderConfigRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/domain_provider.ProviderConfigResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
-      summary: Configure org-level provider
   /organizations/{orgId}/usage:
     get:
       parameters:
@@ -18070,62 +18489,6 @@ paths:
           schema:
             $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
       summary: Get org LLM usage time series
-  /orgs/{orgId}/model-config:
-    delete:
-      parameters:
-      - description: Org ID
-        in: path
-        name: orgId
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-      summary: Clear org model config
-      tags:
-      - model-config
-    get:
-      parameters:
-      - description: Org ID
-        in: path
-        name: orgId
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/domain_modelconfig.ModelConfigResponse'
-      summary: Get org model config
-      tags:
-      - model-config
-    put:
-      consumes:
-      - application/json
-      parameters:
-      - description: Org ID
-        in: path
-        name: orgId
-        required: true
-        type: string
-      - description: Model config
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/domain_modelconfig.UpsertModelConfigRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/domain_modelconfig.ModelConfigResponse'
-      summary: Set org model config
-      tags:
-      - model-config
   /projects/{projectId}/model-config:
     delete:
       parameters:
@@ -18290,7 +18653,7 @@ paths:
         name: projectId
         required: true
         type: string
-      - description: Provider name (google or google-vertex)
+      - description: Provider name (google, google-vertex, openai, or deepseek)
         in: path
         name: provider
         required: true
@@ -18437,7 +18800,7 @@ paths:
   /providers/{provider}/test:
     post:
       parameters:
-      - description: Provider name (google or google-vertex)
+      - description: Provider name (google, google-vertex, openai, or deepseek)
         in: path
         name: provider
         required: true
@@ -18602,6 +18965,37 @@ paths:
           schema:
             $ref: '#/definitions/github_com_emergent-company_emergent_memory_pkg_apperror.Error'
       summary: Get current user LLM usage time series
+  /v1/chat/completions:
+    post:
+      consumes:
+      - application/json
+      description: Invoke a Memory agent using the OpenAI Chat Completions API format.
+        Supports streaming (SSE) and client-supplied tools via suspend/resume.
+      parameters:
+      - description: Chat completion request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/domain_agentcompat.ChatCompletionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/domain_agentcompat.ChatCompletionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/domain_agentcompat.APIError'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/domain_agentcompat.APIError'
+      summary: OpenAI-compatible chat completions
+      tags:
+      - agentcompat
   /v1/models:
     get:
       parameters:
