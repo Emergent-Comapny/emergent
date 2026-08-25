@@ -352,3 +352,63 @@ func TestResolveAny_PropagatesLastError(t *testing.T) {
 		t.Errorf("expected nil, got %+v", resolved)
 	}
 }
+
+// TestResolveAnyEmbedding_NoContext_ReturnsNil verifies that ResolveAnyEmbedding
+// returns (nil, nil) when there is no project context.
+func TestResolveAnyEmbedding_NoContext_ReturnsNil(t *testing.T) {
+	cfg := &config.Config{}
+	svc := newTestCredentialService(cfg)
+
+	resolved, err := svc.ResolveAnyEmbedding(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resolved != nil {
+		t.Errorf("expected nil resolved credential, got %+v", resolved)
+	}
+}
+
+// TestPickEmbeddingConfig_SkipsGenerativeOnlyProviders is a regression test for
+// the embedding fallback: when DeepSeek (generative-only, no embedding model)
+// is configured alongside a Google embedding provider, pickEmbeddingConfig must
+// skip DeepSeek and select the Google config — never short-circuiting on a
+// generative-only provider.
+func TestPickEmbeddingConfig_SkipsGenerativeOnlyProviders(t *testing.T) {
+	cfgs := map[ProviderType]*ProjectProviderConfig{
+		ProviderDeepSeek: {Provider: ProviderDeepSeek, EmbeddingModel: ""},
+		ProviderGoogleAI: {Provider: ProviderGoogleAI, EmbeddingModel: "gemini/gemini-embedding-001"},
+	}
+
+	picked := pickEmbeddingConfig(cfgs)
+	if picked == nil {
+		t.Fatal("expected a config to be picked")
+	}
+	if picked.Provider != ProviderGoogleAI {
+		t.Errorf("picked provider = %q, want %q", picked.Provider, ProviderGoogleAI)
+	}
+}
+
+// TestPickEmbeddingConfig_NoneHaveEmbedding verifies pickEmbeddingConfig returns
+// nil when no configured provider carries an embedding model.
+func TestPickEmbeddingConfig_NoneHaveEmbedding(t *testing.T) {
+	cfgs := map[ProviderType]*ProjectProviderConfig{
+		ProviderDeepSeek: {Provider: ProviderDeepSeek, EmbeddingModel: ""},
+		ProviderOpenAI:   {Provider: ProviderOpenAI, EmbeddingModel: ""},
+	}
+	if picked := pickEmbeddingConfig(cfgs); picked != nil {
+		t.Errorf("expected nil, got %+v", picked)
+	}
+}
+
+// TestPickEmbeddingConfig_RespectsOrder verifies pickEmbeddingConfig prefers
+// Google AI over Vertex AI when both carry an embedding model.
+func TestPickEmbeddingConfig_RespectsOrder(t *testing.T) {
+	cfgs := map[ProviderType]*ProjectProviderConfig{
+		ProviderVertexAI: {Provider: ProviderVertexAI, EmbeddingModel: "gemini-embedding-001"},
+		ProviderGoogleAI: {Provider: ProviderGoogleAI, EmbeddingModel: "gemini-embedding-001"},
+	}
+	picked := pickEmbeddingConfig(cfgs)
+	if picked == nil || picked.Provider != ProviderGoogleAI {
+		t.Errorf("picked = %+v, want ProviderGoogleAI first", picked)
+	}
+}

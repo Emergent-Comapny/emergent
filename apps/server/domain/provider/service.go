@@ -194,6 +194,62 @@ func (s *CredentialService) ResolveAny(ctx context.Context) (*ResolvedCredential
 	return nil, nil
 }
 
+// embeddingProviderOrder lists providers in preference order for embedding
+// resolution. Google AI and Vertex AI come first (native embedding support),
+// then OpenAI (embedding via the OpenAI API). DeepSeek is last — it has no
+// embedding API, so its configs never carry an EmbeddingModel.
+var embeddingProviderOrder = []ProviderType{
+	ProviderGoogleAI,
+	ProviderVertexAI,
+	ProviderOpenAI,
+	ProviderDeepSeek,
+}
+
+// pickEmbeddingConfig selects the first project provider config (from cfgs,
+// keyed by provider) that carries a non-empty embedding model, in
+// embeddingProviderOrder. Returns nil when no provider has an embedding model.
+func pickEmbeddingConfig(cfgs map[ProviderType]*ProjectProviderConfig) *ProjectProviderConfig {
+	for _, p := range embeddingProviderOrder {
+		if cfg := cfgs[p]; cfg != nil && cfg.EmbeddingModel != "" {
+			return cfg
+		}
+	}
+	return nil
+}
+
+// ResolveAnyEmbedding resolves the best available embedding credential for the
+// request context. Unlike ResolveAny (which prefers DeepSeek/OpenAI for
+// generative work), it skips providers without an embedding model, so it never
+// short-circuits on a generative-only provider (DeepSeek/OpenAI) when a Google
+// or Vertex embedding provider is also configured.
+// Returns nil, nil when no project context is present or no provider has an
+// embedding model configured.
+func (s *CredentialService) ResolveAnyEmbedding(ctx context.Context) (*ResolvedCredential, error) {
+	projectID := auth.ProjectIDFromContext(ctx)
+	if projectID == "" {
+		return nil, nil // no project context — env-var callers handle this
+	}
+
+	cfgs := make(map[ProviderType]*ProjectProviderConfig, len(embeddingProviderOrder))
+	for _, p := range embeddingProviderOrder {
+		cfg, err := s.repo.GetProjectProviderConfig(ctx, projectID, p)
+		if err != nil {
+			s.log.Debug("embedding credential lookup failed, trying next",
+				slog.String("provider", string(p)),
+				slog.String("error", err.Error()),
+			)
+			continue
+		}
+		cfgs[p] = cfg
+	}
+
+	cfg := pickEmbeddingConfig(cfgs)
+	if cfg == nil {
+		return nil, nil
+	}
+	return s.decryptProjectConfig(cfg)
+}
+
 // UpsertOrgConfig is deprecated. Org-level provider config is no longer supported.
 // Use UpsertProjectConfig instead.
 func (s *CredentialService) UpsertOrgConfig(ctx context.Context, orgID string, provider ProviderType, req UpsertProviderConfigRequest) (*ProviderConfigResponse, error) {

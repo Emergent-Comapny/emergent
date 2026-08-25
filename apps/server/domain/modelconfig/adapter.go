@@ -75,26 +75,44 @@ func (a *EmbeddingResolverAdapter) ResolveEmbedding(ctx context.Context) (*embed
 	if err != nil {
 		return nil, fmt.Errorf("embedding resolver: failed to resolve embedding model: %w", err)
 	}
-	if model == "" {
-		return nil, fmt.Errorf("no embedding model configured for project %s — run 'memory projects set-models --embedding provider/model-name'", projectIDStr)
+
+	// Fast path: model set via project_model_config (projects set-models).
+	if model != "" {
+		parts := strings.SplitN(model, "/", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("embedding resolver: invalid model name %q — must be 'provider/model-name'", model)
+		}
+		cred, err := a.credsvc.ResolveFor(ctx, parts[0])
+		if err != nil {
+			return nil, fmt.Errorf("embedding resolver: failed to get credentials for provider %q: %w", parts[0], err)
+		}
+		if cred == nil {
+			return nil, fmt.Errorf("no credentials configured for provider %q — run 'memory provider configure-project %s --api-key ...'", parts[0], parts[0])
+		}
+		return a.buildEmbeddingCredential(cred, parts[1]), nil
 	}
 
-	// Parse provider prefix from "provider/model-name"
-	parts := strings.SplitN(model, "/", 2)
-	if len(parts) != 2 {
-		return nil, fmt.Errorf("embedding resolver: invalid model name %q — must be 'provider/model-name'", model)
+	// Fallback: no project_model_config — use the provider credential's
+	// embedding model (set via 'memory provider configure-project <provider>
+	// --embedding-model <model>'). ResolveAnyEmbedding skips providers without
+	// an embedding model, so it never short-circuits on a generative-only
+	// provider (e.g. DeepSeek).
+	if cred, err := a.credsvc.ResolveAnyEmbedding(ctx); err != nil {
+		return nil, fmt.Errorf("embedding resolver: failed to resolve embedding credential: %w", err)
+	} else if cred != nil && cred.EmbeddingModel != "" {
+		emb := cred.EmbeddingModel
+		if _, bare, ok := strings.Cut(emb, "/"); ok {
+			emb = bare
+		}
+		return a.buildEmbeddingCredential(cred, emb), nil
 	}
-	providerPrefix := parts[0]
-	modelName := parts[1]
 
-	cred, err := a.credsvc.ResolveFor(ctx, providerPrefix)
-	if err != nil {
-		return nil, fmt.Errorf("embedding resolver: failed to get credentials for provider %q: %w", providerPrefix, err)
-	}
-	if cred == nil {
-		return nil, fmt.Errorf("no credentials configured for provider %q — run 'memory provider configure-project %s --api-key ...'", providerPrefix, providerPrefix)
-	}
+	return nil, fmt.Errorf("no embedding model configured for project %s — run 'memory projects set-models --embedding provider/model-name' or 'memory provider configure-project <provider> --embedding-model <model>'", projectIDStr)
+}
 
+// buildEmbeddingCredential maps a resolved provider credential to the
+// embeddings.ResolvedEmbeddingCredential shape, using the given bare model name.
+func (a *EmbeddingResolverAdapter) buildEmbeddingCredential(cred *provider.ResolvedCredential, bareModel string) *embeddings.ResolvedEmbeddingCredential {
 	return &embeddings.ResolvedEmbeddingCredential{
 		IsGoogleAI:         cred.Provider == provider.ProviderGoogleAI,
 		APIKey:             cred.APIKey,
@@ -102,8 +120,8 @@ func (a *EmbeddingResolverAdapter) ResolveEmbedding(ctx context.Context) (*embed
 		GCPProject:         cred.GCPProject,
 		Location:           cred.Location,
 		ServiceAccountJSON: cred.ServiceAccountJSON,
-		EmbeddingModel:     modelName,
+		EmbeddingModel:     bareModel,
 		BaseURL:            cred.BaseURL,
 		Source:             string(cred.Source),
-	}, nil
+	}
 }
