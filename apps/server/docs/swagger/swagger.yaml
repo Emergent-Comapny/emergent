@@ -6964,7 +6964,7 @@ info:
   license:
     name: Proprietary
   title: Memory API
-  version: 0.45.1
+  version: 0.45.2
 paths:
   /.well-known/oauth-protected-resource:
     get:
