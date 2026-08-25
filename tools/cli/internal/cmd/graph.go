@@ -212,6 +212,122 @@ func getProjectScopedGraphClient(cmd *cobra.Command, projectFlag string) (*sdkgr
 	return c.SDK.Graph, nil
 }
 
+// resolveGraphObjectArgOrPick resolves a graph object entity ID from args[0],
+// or, when args is empty and stdin is a terminal, lists objects and shows an
+// interactive picker. Returns the resolved entity ID and a display label.
+// The returned ID is the stable EntityID (a UUID); when args[0] is a non-UUID
+// key, callers perform key→ID resolution themselves (see graph objects get).
+func resolveGraphObjectArgOrPick(cmd *cobra.Command, g *sdkgraph.Client, args []string) (id, name string, err error) {
+	if len(args) > 0 && args[0] != "" {
+		return args[0], args[0], nil
+	}
+
+	if isNonInteractive() {
+		return "", "", fmt.Errorf("object ID is required — pass one or run interactively to pick from a list")
+	}
+
+	opts := &sdkgraph.ListObjectsOptions{}
+	if graphBranchFlag != "" {
+		branchID, err := resolveBranchNameOrID(cmd, graphBranchFlag)
+		if err != nil {
+			return "", "", err
+		}
+		opts.BranchID = branchID
+	}
+	if graphTypeFlag != "" {
+		opts.Type = graphTypeFlag
+	}
+	if graphLimitFlag > 0 {
+		opts.Limit = graphLimitFlag
+	}
+
+	resp, err := g.ListObjects(context.Background(), opts)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to list objects: %w", err)
+	}
+	if len(resp.Items) == 0 {
+		return "", "", fmt.Errorf("no objects found")
+	}
+
+	items := make([]PickerItem, 0, len(resp.Items))
+	for _, obj := range resp.Items {
+		label := obj.EntityID
+		if obj.Type != "" {
+			label = obj.Type + "  " + label
+		}
+		if n := nameFromProps(obj.Properties); n != "" {
+			label = label + "  " + n
+		}
+		if obj.Key != nil && *obj.Key != "" {
+			label = label + "  (" + *obj.Key + ")"
+		}
+		items = append(items, PickerItem{ID: obj.EntityID, Name: label})
+	}
+
+	pickedID, pickedName, err := promptResourcePicker("Select an object", items)
+	if err != nil {
+		return "", "", err
+	}
+	if pickedID == "" {
+		return "", "", fmt.Errorf("object ID is required")
+	}
+	return pickedID, pickedName, nil
+}
+
+// resolveGraphRelationshipArgOrPick resolves a graph relationship entity ID
+// from args[0], or, when args is empty and stdin is a terminal, lists
+// relationships and shows an interactive picker. Returns the resolved entity
+// ID and a display label.
+func resolveGraphRelationshipArgOrPick(cmd *cobra.Command, g *sdkgraph.Client, args []string) (id, name string, err error) {
+	if len(args) > 0 && args[0] != "" {
+		return args[0], args[0], nil
+	}
+
+	if isNonInteractive() {
+		return "", "", fmt.Errorf("relationship ID is required — pass one or run interactively to pick from a list")
+	}
+
+	opts := &sdkgraph.ListRelationshipsOptions{}
+	if graphRelTypeFlag != "" {
+		opts.Type = graphRelTypeFlag
+	}
+	if graphBranchFlag != "" {
+		opts.BranchID = graphBranchFlag
+	}
+	if graphLimitFlag > 0 {
+		opts.Limit = graphLimitFlag
+	}
+
+	resp, err := g.ListRelationships(context.Background(), opts)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to list relationships: %w", err)
+	}
+	if len(resp.Items) == 0 {
+		return "", "", fmt.Errorf("no relationships found")
+	}
+
+	items := make([]PickerItem, 0, len(resp.Items))
+	for _, r := range resp.Items {
+		label := r.EntityID
+		if r.Type != "" {
+			label = r.Type + "  " + label
+		}
+		if r.SrcID != "" && r.DstID != "" {
+			label = label + "  " + r.SrcID + " → " + r.DstID
+		}
+		items = append(items, PickerItem{ID: r.EntityID, Name: label})
+	}
+
+	pickedID, pickedName, err := promptResourcePicker("Select a relationship", items)
+	if err != nil {
+		return "", "", err
+	}
+	if pickedID == "" {
+		return "", "", fmt.Errorf("relationship ID is required")
+	}
+	return pickedID, pickedName, nil
+}
+
 // ─────────────────────────────────────────────
 // graph objects list
 // ─────────────────────────────────────────────
@@ -354,14 +470,17 @@ Examples:
   memory graph objects get my-object-key
   memory graph objects get my-object-key --branch plan/next-gen
   memory graph objects get my-object-key --branch <branch-uuid>`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		g, err := getGraphClient(cmd)
 		if err != nil {
 			return err
 		}
 
-		idOrKey := args[0]
+		idOrKey, _, err := resolveGraphObjectArgOrPick(cmd, g, args)
+		if err != nil {
+			return err
+		}
 
 		// Resolve branch name → UUID if --branch was provided.
 		var resolvedBranchID string
@@ -548,7 +667,7 @@ var graphObjectsUpdateCmd = &cobra.Command{
 	Use:   "update <id>",
 	Short: "Update a graph object",
 	Long:  "Update a graph object's properties or status (creates a new version)",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		g, err := getGraphClient(cmd)
 		if err != nil {
@@ -588,7 +707,12 @@ var graphObjectsUpdateCmd = &cobra.Command{
 			req.Properties["description"] = graphDescFlag
 		}
 
-		obj, err := g.UpdateObject(context.Background(), args[0], req)
+		objectID, _, err := resolveGraphObjectArgOrPick(cmd, g, args)
+		if err != nil {
+			return err
+		}
+
+		obj, err := g.UpdateObject(context.Background(), objectID, req)
 		if err != nil {
 			return fmt.Errorf("failed to update object: %w", err)
 		}
@@ -712,7 +836,7 @@ var graphObjectsDeleteCmd = &cobra.Command{
 	Use:   "delete <id>",
 	Short: "Delete a graph object",
 	Long:  "Soft-delete a graph object by ID",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		g, err := getGraphClient(cmd)
 		if err != nil {
@@ -728,11 +852,16 @@ var graphObjectsDeleteCmd = &cobra.Command{
 			branchID = &resolved
 		}
 
-		if err := g.DeleteObject(context.Background(), args[0], branchID); err != nil {
+		objectID, objectName, err := resolveGraphObjectArgOrPick(cmd, g, args)
+		if err != nil {
+			return err
+		}
+
+		if err := g.DeleteObject(context.Background(), objectID, branchID); err != nil {
 			return fmt.Errorf("failed to delete object: %w", err)
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "Object %s deleted.\n", args[0])
+		fmt.Fprintf(cmd.OutOrStdout(), "Object %s deleted.\n", objectName)
 		return nil
 	},
 }
@@ -749,14 +878,19 @@ var graphObjectsEdgesCmd = &cobra.Command{
 Prints two sections: Outgoing (format: [Type] → DstID (entity: EntityID)) and
 Incoming (format: [Type] ← SrcID (entity: EntityID)) with counts for each.
 Use --output json to receive the full edges response as JSON.`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		g, err := getGraphClient(cmd)
 		if err != nil {
 			return err
 		}
 
-		edges, err := g.GetObjectEdges(context.Background(), args[0], nil)
+		objectID, _, err := resolveGraphObjectArgOrPick(cmd, g, args)
+		if err != nil {
+			return err
+		}
+
+		edges, err := g.GetObjectEdges(context.Background(), objectID, nil)
 		if err != nil {
 			return fmt.Errorf("failed to get edges: %w", err)
 		}
@@ -804,7 +938,7 @@ Examples:
   memory graph objects similar <entity-id>
   memory graph objects similar <entity-id> --limit 20 --type Feature
   memory graph objects similar <entity-id> --min-score 0.75 --output json`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		g, err := getGraphClient(cmd)
 		if err != nil {
@@ -823,7 +957,12 @@ Examples:
 			opts.MinScore = &v
 		}
 
-		results, err := g.FindSimilar(context.Background(), args[0], opts)
+		objectID, _, err := resolveGraphObjectArgOrPick(cmd, g, args)
+		if err != nil {
+			return err
+		}
+
+		results, err := g.FindSimilar(context.Background(), objectID, opts)
 		if err != nil {
 			return fmt.Errorf("failed to find similar objects: %w", err)
 		}
@@ -1017,9 +1156,14 @@ the flag to move to the main branch.
 Examples:
   memory graph objects move <entity-id> --target-branch <branch-uuid>
   memory graph objects move <entity-id> --target-branch main`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		g, err := getGraphClient(cmd)
+		if err != nil {
+			return err
+		}
+
+		objectID, _, err := resolveGraphObjectArgOrPick(cmd, g, args)
 		if err != nil {
 			return err
 		}
@@ -1030,7 +1174,7 @@ Examples:
 		}
 		// nil TargetBranchID means move to main branch
 
-		result, err := g.MoveObject(context.Background(), args[0], req)
+		result, err := g.MoveObject(context.Background(), objectID, req)
 		if err != nil {
 			if apiErr, ok := err.(*sdkerrors.Error); ok {
 				return fmt.Errorf("move failed (%d): %s", apiErr.StatusCode, apiErr.Message)
@@ -1166,14 +1310,19 @@ var graphRelationshipsGetCmd = &cobra.Command{
 Prints Entity ID, Version ID, Type, From (source entity ID), To (destination
 entity ID), Version number, Created timestamp, and Properties as formatted
 JSON. Use --output json to receive the full relationship as JSON instead.`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		g, err := getGraphClient(cmd)
 		if err != nil {
 			return err
 		}
 
-		r, err := g.GetRelationship(context.Background(), args[0])
+		relationshipID, _, err := resolveGraphRelationshipArgOrPick(cmd, g, args)
+		if err != nil {
+			return err
+		}
+
+		r, err := g.GetRelationship(context.Background(), relationshipID)
 		if err != nil {
 			return fmt.Errorf("failed to get relationship: %w", err)
 		}
@@ -1290,7 +1439,7 @@ Examples:
   memory graph relationships delete <id>
   memory graph relationships delete <id> --branch plan/next-gen
   memory graph relationships delete <id> --branch <branch-uuid>`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		g, err := getGraphClient(cmd)
 		if err != nil {
@@ -1305,11 +1454,16 @@ Examples:
 			}
 		}
 
-		if err := g.DeleteRelationship(context.Background(), args[0], resolvedBranch); err != nil {
+		relationshipID, relationshipName, err := resolveGraphRelationshipArgOrPick(cmd, g, args)
+		if err != nil {
+			return err
+		}
+
+		if err := g.DeleteRelationship(context.Background(), relationshipID, resolvedBranch); err != nil {
 			return fmt.Errorf("failed to delete relationship: %w", err)
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "Relationship %s deleted.\n", args[0])
+		fmt.Fprintf(cmd.OutOrStdout(), "Relationship %s deleted.\n", relationshipName)
 		return nil
 	},
 }

@@ -172,6 +172,96 @@ func getSchemasClient(cmd *cobra.Command) (*sdkschemas.Client, error) {
 	return c.SDK.Schemas, nil
 }
 
+// resolveSchemaArgOrPick resolves a registry schema ID from args[0], or, when
+// args is empty and stdin is a terminal, lists schemas available in the
+// registry and shows an interactive picker. Returns the resolved schema ID and
+// a display name.
+func resolveSchemaArgOrPick(cmd *cobra.Command, args []string) (id, name string, err error) {
+	if len(args) > 0 && args[0] != "" {
+		return args[0], args[0], nil
+	}
+
+	if isNonInteractive() {
+		return "", "", fmt.Errorf("schema ID is required — pass one or run interactively to pick from a list")
+	}
+
+	tp, err := getSchemasClient(cmd)
+	if err != nil {
+		return "", "", err
+	}
+
+	packs, err := tp.GetAvailablePacks(context.Background())
+	if err != nil {
+		return "", "", fmt.Errorf("failed to list available schemas: %w", err)
+	}
+	if len(packs) == 0 {
+		return "", "", fmt.Errorf("no schemas available in the registry")
+	}
+
+	items := make([]PickerItem, len(packs))
+	for i, p := range packs {
+		label := p.Name
+		if p.Version != "" {
+			label = p.Name + " v" + p.Version
+		}
+		items[i] = PickerItem{ID: p.ID, Name: label}
+	}
+
+	id, name, err = promptResourcePicker("Select a schema", items)
+	if err != nil {
+		return "", "", err
+	}
+	if id == "" {
+		return "", "", fmt.Errorf("schema ID is required")
+	}
+	return id, name, nil
+}
+
+// resolveInstalledAssignmentArgOrPick resolves a schema assignment ID from
+// args[0], or, when args is empty and stdin is a terminal, lists installed
+// schema assignments and shows an interactive picker. Returns the resolved
+// assignment ID and a display name.
+func resolveInstalledAssignmentArgOrPick(cmd *cobra.Command, args []string) (id, name string, err error) {
+	if len(args) > 0 && args[0] != "" {
+		return args[0], args[0], nil
+	}
+
+	if isNonInteractive() {
+		return "", "", fmt.Errorf("assignment ID is required — pass one or run interactively to pick from a list")
+	}
+
+	tp, err := getSchemasClient(cmd)
+	if err != nil {
+		return "", "", err
+	}
+
+	installed, err := tp.GetInstalledPacks(context.Background())
+	if err != nil {
+		return "", "", fmt.Errorf("failed to list installed schemas: %w", err)
+	}
+	if len(installed) == 0 {
+		return "", "", fmt.Errorf("no schemas installed on this project")
+	}
+
+	items := make([]PickerItem, len(installed))
+	for i, p := range installed {
+		label := p.Name
+		if p.Version != "" {
+			label = p.Name + " v" + p.Version
+		}
+		items[i] = PickerItem{ID: p.ID, Name: label}
+	}
+
+	id, name, err = promptResourcePicker("Select an installed schema assignment", items)
+	if err != nil {
+		return "", "", err
+	}
+	if id == "" {
+		return "", "", fmt.Errorf("assignment ID is required")
+	}
+	return id, name, nil
+}
+
 // ─────────────────────────────────────────────
 // schemas list  (installed schemas by default; --available for registry)
 // ─────────────────────────────────────────────
@@ -321,15 +411,20 @@ var schemasGetCmd = &cobra.Command{
 Prints ID, Name, Version, Description (if set), Author (if set), Draft status,
 and Created timestamp. Use --output json to receive the full schema record as
 JSON instead.`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		schemaID, _, err := resolveSchemaArgOrPick(cmd, args)
+		if err != nil {
+			return err
+		}
+
 		// get-schema is a global operation — no project context needed
 		c, err := getClient(cmd)
 		if err != nil {
 			return err
 		}
 
-		pack, err := c.SDK.Schemas.GetPack(context.Background(), args[0])
+		pack, err := c.SDK.Schemas.GetPack(context.Background(), schemaID)
 		if err != nil {
 			return fmt.Errorf("failed to get schema: %w", err)
 		}
@@ -427,7 +522,7 @@ var schemasInstallCmd = &cobra.Command{
   install --file schema.json   Create a new schema from a JSON or YAML file and install it in one step.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 && schemaFileFlag == "" {
+		if len(args) == 0 && schemaFileFlag == "" && isNonInteractive() {
 			return fmt.Errorf("provide either a schema-id argument or --file <path>")
 		}
 		if len(args) > 0 && schemaFileFlag != "" {
@@ -460,8 +555,15 @@ var schemasInstallCmd = &cobra.Command{
 			}
 
 			schemaID = pack.ID
-		} else {
+		} else if len(args) > 0 {
 			schemaID = args[0]
+		} else {
+			// Interactive pick when neither a schema-id argument nor --file is given.
+			id, _, err := resolveSchemaArgOrPick(cmd, args)
+			if err != nil {
+				return err
+			}
+			schemaID = id
 		}
 
 		tp, err := getSchemasClient(cmd)
@@ -582,11 +684,11 @@ Use 'memory schemas installed' to list assignment IDs.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Validate flag/arg combinations
-		hasSingle := len(args) == 1
+		hasSingle := len(args) > 0
 		hasAllExcept := cmd.Flags().Changed("all-except")
 		hasKeepLatest := cmd.Flags().Changed("keep-latest")
 
-		if !hasSingle && !hasAllExcept && !hasKeepLatest {
+		if !hasSingle && !hasAllExcept && !hasKeepLatest && isNonInteractive() {
 			return fmt.Errorf("provide an assignment ID, --all-except, or --keep-latest")
 		}
 		if hasSingle && (hasAllExcept || hasKeepLatest) {
@@ -601,16 +703,27 @@ Use 'memory schemas installed' to list assignment IDs.`,
 			return err
 		}
 
-		// Single-assignment mode
-		if hasSingle {
+		// Single-assignment mode: positional arg, or interactive pick when
+		// neither an arg nor a bulk flag is given.
+		if !hasAllExcept && !hasKeepLatest {
+			assignmentID := ""
+			if hasSingle {
+				assignmentID = args[0]
+			} else {
+				id, _, err := resolveInstalledAssignmentArgOrPick(cmd, args)
+				if err != nil {
+					return err
+				}
+				assignmentID = id
+			}
 			if schemaDryRunFlag {
-				fmt.Fprintf(cmd.OutOrStdout(), "[dry-run] Would remove schema assignment %s\n", args[0])
+				fmt.Fprintf(cmd.OutOrStdout(), "[dry-run] Would remove schema assignment %s\n", assignmentID)
 				return nil
 			}
-			if err := tp.DeleteAssignment(context.Background(), args[0]); err != nil {
+			if err := tp.DeleteAssignment(context.Background(), assignmentID); err != nil {
 				return fmt.Errorf("failed to uninstall schema: %w", err)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Schema assignment %s removed.\n", args[0])
+			fmt.Fprintf(cmd.OutOrStdout(), "Schema assignment %s removed.\n", assignmentID)
 			return nil
 		}
 
@@ -691,19 +804,24 @@ var schemasDeleteCmd = &cobra.Command{
 	Use:   "delete <schema-id>",
 	Short: "Delete a schema from the registry",
 	Long:  "Permanently delete a schema definition from the global registry",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		schemaID, _, err := resolveSchemaArgOrPick(cmd, args)
+		if err != nil {
+			return err
+		}
+
 		// delete-schema is a global operation — no project context needed
 		c, err := getClient(cmd)
 		if err != nil {
 			return err
 		}
 
-		if err := c.SDK.Schemas.DeletePack(context.Background(), args[0]); err != nil {
+		if err := c.SDK.Schemas.DeletePack(context.Background(), schemaID); err != nil {
 			return fmt.Errorf("failed to delete schema: %w", err)
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "Schema %s deleted.\n", args[0])
+		fmt.Fprintf(cmd.OutOrStdout(), "Schema %s deleted.\n", schemaID)
 		return nil
 	},
 }

@@ -81,6 +81,54 @@ func resolveBranchNameOrID(cmd *cobra.Command, nameOrID string) (string, error) 
 	}
 }
 
+// resolveBranchArgOrPick resolves a branch ID from args[0], or, when args is
+// empty and stdin is a terminal, lists branches in the current project and
+// shows an interactive picker. args[0] may be a branch UUID, a branch name
+// (resolved to its ID), or the special keyword "main" (used by merge/fork and
+// passed through unchanged). Returns the resolved branch ID and display name.
+func resolveBranchArgOrPick(cmd *cobra.Command, b *sdkbranches.Client, args []string) (id, name string, err error) {
+	if len(args) > 0 && args[0] != "" {
+		if args[0] == "main" {
+			return args[0], args[0], nil
+		}
+		branchID, err := resolveBranchNameOrID(cmd, args[0])
+		if err != nil {
+			return "", "", err
+		}
+		return branchID, args[0], nil
+	}
+
+	if isNonInteractive() {
+		return "", "", fmt.Errorf("branch ID is required — pass one or run interactively to pick from a list")
+	}
+
+	branches, err := b.List(context.Background(), nil)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to list branches: %w", err)
+	}
+	if len(branches) == 0 {
+		return "", "", fmt.Errorf("no branches found in the current project")
+	}
+
+	items := make([]PickerItem, 0, len(branches))
+	for _, br := range branches {
+		label := br.Name
+		if br.Description != nil && *br.Description != "" {
+			label = br.Name + "  " + *br.Description
+		}
+		items = append(items, PickerItem{ID: br.ID, Name: label})
+	}
+
+	pickedID, pickedName, err := promptResourcePicker("Select a branch", items)
+	if err != nil {
+		return "", "", err
+	}
+	if pickedID == "" {
+		return "", "", fmt.Errorf("branch ID is required")
+	}
+	return pickedID, pickedName, nil
+}
+
 // ─────────────────────────────────────────────
 // graph branches (sub-group)
 // ─────────────────────────────────────────────
@@ -176,23 +224,31 @@ Examples:
 // ─────────────────────────────────────────────
 
 var graphBranchesGetCmd = &cobra.Command{
-	Use:   "get <id>",
+	Use:   "get [id]",
 	Short: "Get a branch by ID",
 	Long: `Get details for a branch by its ID.
 
 Use --output json to receive the full object as JSON.
 
+When the branch ID is omitted and the terminal is interactive, a picker
+lists the branches in the current project.
+
 Examples:
   memory graph branches get <branch-id>
   memory graph branches get <branch-id> --output json`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		b, _, err := getBranchesClient(cmd)
 		if err != nil {
 			return err
 		}
 
-		branch, err := b.Get(context.Background(), args[0])
+		branchID, _, err := resolveBranchArgOrPick(cmd, b, args)
+		if err != nil {
+			return err
+		}
+
+		branch, err := b.Get(context.Background(), branchID)
 		if err != nil {
 			return fmt.Errorf("failed to get branch: %w", err)
 		}
@@ -306,24 +362,32 @@ Examples:
 // ─────────────────────────────────────────────
 
 var graphBranchesUpdateCmd = &cobra.Command{
-	Use:   "update <id>",
+	Use:   "update [id]",
 	Short: "Update a branch",
 	Long: `Update a branch's name or description.
 
 Use --name to rename the branch. Use --description to set or update the
 description. At least one flag is required.
 
+When the branch ID is omitted and the terminal is interactive, a picker
+lists the branches in the current project.
+
 Examples:
   memory graph branches update <branch-id> --name "new-name"
   memory graph branches update <branch-id> --description "staging area for Q4 planning"
   memory graph branches update <branch-id> --name "new-name" --description "updated purpose"`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if branchNameFlag == "" && branchDescriptionFlag == "" {
 			return fmt.Errorf("at least one of --name or --description is required")
 		}
 
 		b, _, err := getBranchesClient(cmd)
+		if err != nil {
+			return err
+		}
+
+		branchID, _, err := resolveBranchArgOrPick(cmd, b, args)
 		if err != nil {
 			return err
 		}
@@ -336,7 +400,7 @@ Examples:
 			updateReq.Description = &branchDescriptionFlag
 		}
 
-		branch, err := b.Update(context.Background(), args[0], updateReq)
+		branch, err := b.Update(context.Background(), branchID, updateReq)
 		if err != nil {
 			return fmt.Errorf("failed to update branch: %w", err)
 		}
@@ -366,27 +430,35 @@ Examples:
 // ─────────────────────────────────────────────
 
 var graphBranchesDeleteCmd = &cobra.Command{
-	Use:   "delete <id>",
+	Use:   "delete [id]",
 	Short: "Delete a branch",
 	Long: `Delete a branch and all objects that exist only on that branch.
 
 Objects that have already been merged into another branch are unaffected.
 This operation is irreversible.
 
+When the branch ID is omitted and the terminal is interactive, a picker
+lists the branches in the current project.
+
 Examples:
   memory graph branches delete <branch-id>`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		b, _, err := getBranchesClient(cmd)
 		if err != nil {
 			return err
 		}
 
-		if err := b.Delete(context.Background(), args[0]); err != nil {
+		branchID, _, err := resolveBranchArgOrPick(cmd, b, args)
+		if err != nil {
+			return err
+		}
+
+		if err := b.Delete(context.Background(), branchID); err != nil {
 			return fmt.Errorf("failed to delete branch: %w", err)
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "Branch %s deleted.\n", args[0])
+		fmt.Fprintf(cmd.OutOrStdout(), "Branch %s deleted.\n", branchID)
 		return nil
 	},
 }
@@ -396,7 +468,7 @@ Examples:
 // ─────────────────────────────────────────────
 
 var graphBranchesMergeCmd = &cobra.Command{
-	Use:   "merge <target-branch-id|main>",
+	Use:   "merge [target-branch-id|main]",
 	Short: "Merge a source branch into a target branch (or main)",
 	Long: `Merge changes from a source branch into a target branch.
 
@@ -404,7 +476,9 @@ DIRECTION: source → target. The source branch is read; the target branch
 receives the changes.
 
 TARGET: use a branch UUID from "memory graph branches list", or the special
-keyword "main" to merge into the main graph (branch_id IS NULL).
+keyword "main" to merge into the main graph (branch_id IS NULL). When the
+target is omitted and the terminal is interactive, a picker lists the
+branches in the current project.
 
 By default this is a DRY RUN — no changes are made. Pass --execute only
 when you are ready to apply.
@@ -435,7 +509,7 @@ Examples:
   memory graph branches merge main --source <source-id> --execute
   memory graph branches merge <target-id> --source <source-id> --execute
   memory graph branches merge <target-id> --source <source-id> --output json`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if branchSourceFlag == "" {
 			return fmt.Errorf("--source is required")
@@ -446,7 +520,12 @@ Examples:
 			return err
 		}
 
-		result, err := b.Merge(context.Background(), args[0], &sdkbranches.MergeRequest{
+		targetBranchID, _, err := resolveBranchArgOrPick(cmd, b, args)
+		if err != nil {
+			return err
+		}
+
+		result, err := b.Merge(context.Background(), targetBranchID, &sdkbranches.MergeRequest{
 			SourceBranchID: branchSourceFlag,
 			Execute:        branchExecuteFlag,
 		})
@@ -515,13 +594,15 @@ Examples:
 // ─────────────────────────────────────────────
 
 var graphBranchesForkCmd = &cobra.Command{
-	Use:   "fork <source-branch-id|main>",
+	Use:   "fork [source-branch-id|main]",
 	Short: "Fork a branch with object copies",
 	Long: `Fork a branch — create a new branch and copy all HEAD objects and
 relationships from the source into it.
 
 SOURCE: use a branch UUID from "memory graph branches list", or the special
-keyword "main" to fork from the main graph (branch_id IS NULL).
+keyword "main" to fork from the main graph (branch_id IS NULL). When the
+source is omitted and the terminal is interactive, a picker lists the
+branches in the current project.
 
 Copied objects preserve their canonical IDs so a subsequent merge back
 into the source is aware of shared identity. Only HEAD versions are
@@ -535,13 +616,24 @@ Examples:
   memory graph branches fork main --name "what-if-scenario"
   memory graph branches fork main --name "subset" --filter-type Service --filter-type API
   memory graph branches fork <source-branch-id> --name "child" --description "child branch"`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if branchNameFlag == "" {
 			return fmt.Errorf("--name is required")
 		}
 
-		g, err := getGraphClient(cmd)
+		c, err := getClient(cmd)
+		if err != nil {
+			return err
+		}
+
+		projectID, err := resolveProjectContext(cmd, graphProjectFlag)
+		if err != nil {
+			return err
+		}
+		c.SetContext("", projectID)
+
+		sourceBranchID, _, err := resolveBranchArgOrPick(cmd, c.SDK.Branches, args)
 		if err != nil {
 			return err
 		}
@@ -554,7 +646,7 @@ Examples:
 			req.Description = &branchDescriptionFlag
 		}
 
-		result, err := g.ForkBranch(context.Background(), args[0], req)
+		result, err := c.SDK.Graph.ForkBranch(context.Background(), sourceBranchID, req)
 		if err != nil {
 			return fmt.Errorf("failed to fork branch: %w", err)
 		}

@@ -52,6 +52,47 @@ func getDocsClient(cmd *cobra.Command) (*sdkdocs.Client, error) {
 	return c.SDK.Documents, nil
 }
 
+// resolveDocumentArgOrPick resolves a document ID from args[0], or, when args
+// is empty and stdin is a terminal, lists documents in the current project and
+// shows an interactive picker. Returns the resolved document ID and a display
+// name.
+func resolveDocumentArgOrPick(cmd *cobra.Command, c *sdkdocs.Client, args []string) (id, name string, err error) {
+	if len(args) > 0 && args[0] != "" {
+		return args[0], args[0], nil
+	}
+
+	if isNonInteractive() {
+		return "", "", fmt.Errorf("document ID is required — pass one or run interactively to pick from a list")
+	}
+
+	result, err := c.List(context.Background(), &sdkdocs.ListOptions{})
+	if err != nil {
+		return "", "", fmt.Errorf("failed to list documents: %w", err)
+	}
+	docs := result.Documents
+	if len(docs) == 0 {
+		return "", "", fmt.Errorf("no documents found in the current project")
+	}
+
+	items := make([]PickerItem, len(docs))
+	for i, doc := range docs {
+		label := doc.ID
+		if doc.Filename != nil && *doc.Filename != "" {
+			label = *doc.Filename
+		}
+		items[i] = PickerItem{ID: doc.ID, Name: label}
+	}
+
+	pickedID, pickedName, err := promptResourcePicker("Select a document", items)
+	if err != nil {
+		return "", "", err
+	}
+	if pickedID == "" {
+		return "", "", fmt.Errorf("document ID is required")
+	}
+	return pickedID, pickedName, nil
+}
+
 // ─────────────────────────────────────────────
 // documents list
 // ─────────────────────────────────────────────
@@ -147,14 +188,19 @@ var documentsGetCmd = &cobra.Command{
 Prints ID, Filename, MIME Type, Size (bytes), Conversion Status, total Chunks,
 Embedded Chunks, and Created/Updated timestamps. Use --output json to receive
 the full document record as JSON instead.`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		d, err := getDocsClient(cmd)
 		if err != nil {
 			return err
 		}
 
-		doc, err := d.Get(context.Background(), args[0])
+		docID, _, err := resolveDocumentArgOrPick(cmd, d, args)
+		if err != nil {
+			return err
+		}
+
+		doc, err := d.Get(context.Background(), docID)
 		if err != nil {
 			return fmt.Errorf("failed to get document: %w", err)
 		}
@@ -289,14 +335,19 @@ var documentsDeleteCmd = &cobra.Command{
 Prints the deletion status and a summary of removed entities: Chunks,
 Extraction jobs, Graph objects, and Graph relationships. Use --output json
 for a machine-readable response.`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		d, err := getDocsClient(cmd)
 		if err != nil {
 			return err
 		}
 
-		result, err := d.Delete(context.Background(), args[0])
+		docID, _, err := resolveDocumentArgOrPick(cmd, d, args)
+		if err != nil {
+			return err
+		}
+
+		result, err := d.Delete(context.Background(), docID)
 		if err != nil {
 			return fmt.Errorf("failed to delete document: %w", err)
 		}
@@ -331,14 +382,19 @@ job on a document.
 Displays counts of objects created (broken down by type), relationships
 created, chunks processed, and the completion timestamp. Use --output json
 for a machine-readable response.`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		d, err := getDocsClient(cmd)
 		if err != nil {
 			return err
 		}
 
-		summary, err := d.GetExtractionSummary(context.Background(), args[0])
+		docID, _, err := resolveDocumentArgOrPick(cmd, d, args)
+		if err != nil {
+			return err
+		}
+
+		summary, err := d.GetExtractionSummary(context.Background(), docID)
 		if err != nil {
 			return fmt.Errorf("failed to get extraction summary: %w", err)
 		}
