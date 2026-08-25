@@ -9,21 +9,21 @@ import (
 // RegisterAdminRoutes registers extraction jobs admin routes with fx
 // This is called by fx.Invoke to wire up the routes
 func RegisterAdminRoutes(e *echo.Echo, h *AdminHandler, authMiddleware *auth.Middleware) {
-	// All extraction job routes require authentication and admin:read or admin:write scope
+	// All extraction job routes require authentication and admin scope
 	admin := e.Group("/api/admin/extraction-jobs")
 	admin.Use(authMiddleware.RequireAuth())
 
-	// Read operations - require admin:read
+	// Read operations - require admin
 	readGroup := admin.Group("")
-	readGroup.Use(authMiddleware.RequireAPITokenScopes("admin:read"))
+	readGroup.Use(authMiddleware.RequireAPITokenScopes("admin"))
 	readGroup.GET("/projects/:projectId", h.ListJobs)
 	readGroup.GET("/projects/:projectId/statistics", h.GetStatistics)
 	readGroup.GET("/:jobId", h.GetJob)
 	readGroup.GET("/:jobId/logs", h.GetLogs)
 
-	// Write operations - require admin:write
+	// Write operations - require admin
 	writeGroup := admin.Group("")
-	writeGroup.Use(authMiddleware.RequireAPITokenScopes("admin:write"))
+	writeGroup.Use(authMiddleware.RequireAPITokenScopes("admin"))
 	writeGroup.POST("", h.CreateJob)
 	writeGroup.POST("/projects/:projectId/bulk-cancel", h.BulkCancelJobs)
 	writeGroup.DELETE("/projects/:projectId/bulk-delete", h.BulkDeleteJobs)

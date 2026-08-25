@@ -11,17 +11,17 @@ func RegisterRoutes(e *echo.Echo, h *Handler, authMiddleware *auth.Middleware) {
 	admin := e.Group("/api/admin/mcp-servers")
 	admin.Use(authMiddleware.RequireAuth())
 
-	// Read operations - require admin:read
+	// Read operations - require admin
 	readGroup := admin.Group("")
-	readGroup.Use(authMiddleware.RequireAPITokenScopes("admin:read"))
+	readGroup.Use(authMiddleware.RequireAPITokenScopes("admin"))
 	readGroup.GET("", h.ListServers)
 	readGroup.GET("/:id", h.GetServer)
 	readGroup.GET("/:id/tools", h.ListServerTools)
 	readGroup.POST("/:id/inspect", h.InspectServer)
 
-	// Write operations - require admin:write
+	// Write operations - require admin
 	writeGroup := admin.Group("")
-	writeGroup.Use(authMiddleware.RequireAPITokenScopes("admin:write"))
+	writeGroup.Use(authMiddleware.RequireAPITokenScopes("admin"))
 	writeGroup.POST("", h.CreateServer)
 	writeGroup.PATCH("/:id", h.UpdateServer)
 	writeGroup.DELETE("/:id", h.DeleteServer)
@@ -34,11 +34,11 @@ func RegisterRoutes(e *echo.Echo, h *Handler, authMiddleware *auth.Middleware) {
 	builtins.Use(authMiddleware.RequireAuth())
 
 	builtinRead := builtins.Group("")
-	builtinRead.Use(authMiddleware.RequireAPITokenScopes("admin:read"))
+	builtinRead.Use(authMiddleware.RequireAPITokenScopes("admin"))
 	builtinRead.GET("", h.ListBuiltinTools)
 
 	builtinWrite := builtins.Group("")
-	builtinWrite.Use(authMiddleware.RequireAPITokenScopes("admin:write"))
+	builtinWrite.Use(authMiddleware.RequireAPITokenScopes("admin"))
 	builtinWrite.PATCH("/:toolId", h.UpdateBuiltinTool)
 
 	// Official MCP Registry browse/install routes
@@ -47,12 +47,12 @@ func RegisterRoutes(e *echo.Echo, h *Handler, authMiddleware *auth.Middleware) {
 
 	// Read operations - search/get from public registry
 	registryRead := registry.Group("")
-	registryRead.Use(authMiddleware.RequireAPITokenScopes("admin:read"))
+	registryRead.Use(authMiddleware.RequireAPITokenScopes("admin"))
 	registryRead.GET("/search", h.SearchRegistry)
 	registryRead.GET("/servers/:name", h.GetRegistryServer)
 
 	// Write operations - install from registry into project
 	registryWrite := registry.Group("")
-	registryWrite.Use(authMiddleware.RequireAPITokenScopes("admin:write"))
+	registryWrite.Use(authMiddleware.RequireAPITokenScopes("admin"))
 	registryWrite.POST("/install", h.InstallFromRegistry)
 }
