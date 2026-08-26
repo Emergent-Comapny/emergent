@@ -283,6 +283,51 @@ func validateProperties(
 	return validated, nil
 }
 
+// applySchemaDefaults fills schema-declared default values for properties
+// absent from the supplied map, then derives a confidence value from the
+// "source" property when the schema declares both "confidence" and "source"
+// (e.g. Note). Confidence decay/gain was previously maintained by dedicated
+// note tools; this centralizes it in the schema-driven create path.
+func applySchemaDefaults(props map[string]any, schema agents.ObjectSchema) {
+	if props == nil || len(schema.Properties) == 0 {
+		return
+	}
+
+	for name, def := range schema.Properties {
+		if _, present := props[name]; present {
+			continue
+		}
+		if def.Default != nil {
+			props[name] = def.Default
+		}
+	}
+
+	if _, present := props["confidence"]; present {
+		return
+	}
+	if _, hasConf := schema.Properties["confidence"]; !hasConf {
+		return
+	}
+	srcDef, hasSrc := schema.Properties["source"]
+	if !hasSrc {
+		return
+	}
+	src, _ := props["source"].(string)
+	if src == "" {
+		if s, ok := srcDef.Default.(string); ok {
+			src = s
+		}
+	}
+	confidence := 0.7
+	switch src {
+	case "explicit":
+		confidence = 1.0
+	case "corrected":
+		confidence = 0.9
+	}
+	props["confidence"] = confidence
+}
+
 // validatePatchProperties validates only the properties being set or added by a patch request
 // against the current schema. Unlike validateProperties it does NOT enforce required fields,
 // because the object already exists and may have been created under an older schema version

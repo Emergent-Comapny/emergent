@@ -101,6 +101,7 @@ type ObjectSchema struct {
 type PropertyDef struct {
 	Type        string `json:"type"`
 	Description string `json:"description,omitempty"`
+	Default     any    `json:"default,omitempty"`
 }
 
 // RelationshipSchema represents a relationship type schema.

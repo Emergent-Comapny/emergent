@@ -553,6 +553,9 @@ func parseObjectTypeSchemas(raw json.RawMessage) map[string]agents.ObjectSchema 
 				if d, ok := propMap["description"].(string); ok {
 					propDef.Description = d
 				}
+				if dv, ok := propMap["default"]; ok {
+					propDef.Default = dv
+				}
 				schema.Properties[propName] = propDef
 			}
 		}

@@ -194,6 +194,7 @@ func (s *Service) validateObjectProperties(ctx context.Context, projectID uuid.U
 		return nil, apperror.ErrBadRequest.WithMessage("property validation failed: " + err.Error())
 	}
 	s.incrementValidationSuccess(duration)
+	applySchemaDefaults(validated, schema)
 	return validated, nil
 }
 

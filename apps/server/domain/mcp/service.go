@@ -3408,41 +3408,7 @@ func (s *Service) executeGraphBranchDelete(ctx context.Context, projectID string
 //	    {"type": "has_result", "target_id": "<existing-entity-id>", "properties": {}}
 //	  ]
 //	}
-// applyNoteMetadataDefaults fills canonical Note metadata fields when absent.
 //
-// The note/preference abstraction was consolidated onto generic graph
-// primitives (entity-create + search-hybrid + entity-query), but the Note
-// schema still declares confidence, tier, use_count, and needs_review. The
-// dedicated note tools that maintained these were removed, so re-enforce the
-// defaults at the generic entity-create boundary: confidence is derived from
-// the "source" property (explicit=1.0, corrected=0.9, inferred=0.7), matching
-// the prior save_note semantics.
-func applyNoteMetadataDefaults(properties map[string]any) {
-	if _, ok := properties["confidence"]; !ok {
-		confidence := 0.7
-		if source, _ := properties["source"].(string); source != "" {
-			switch source {
-			case "explicit":
-				confidence = 1.0
-			case "corrected":
-				confidence = 0.9
-			case "inferred":
-				confidence = 0.7
-			}
-		}
-		properties["confidence"] = confidence
-	}
-	if _, ok := properties["tier"]; !ok {
-		properties["tier"] = "archival"
-	}
-	if _, ok := properties["use_count"]; !ok {
-		properties["use_count"] = 0
-	}
-	if _, ok := properties["needs_review"]; !ok {
-		properties["needs_review"] = false
-	}
-}
-
 func (s *Service) executeBatchCreateEntities(ctx context.Context, projectID string, args map[string]any) (*ToolResult, error) {
 	projectUUID, err := uuid.Parse(projectID)
 	if err != nil {
@@ -3547,12 +3513,6 @@ func (s *Service) executeBatchCreateEntities(ctx context.Context, projectID stri
 		properties, _ := entityMap["properties"].(map[string]any)
 		if properties == nil {
 			properties = make(map[string]any)
-		}
-
-		// Enforce canonical Note metadata (confidence/tier/use_count/needs_review)
-		// so Note entities always carry confidence for consumers like the gateway.
-		if typeName == "Note" {
-			applyNoteMetadataDefaults(properties)
 		}
 
 		// status flows through properties JSONB; the graph layer syncs the

@@ -370,3 +370,47 @@ func TestValidatePatchProperties(t *testing.T) {
 		assert.Equal(t, float64(42), out["age"])
 	})
 }
+
+func TestApplySchemaDefaults(t *testing.T) {
+	schema := agents.ObjectSchema{
+		Properties: map[string]agents.PropertyDef{
+			"source":       {Type: "string", Default: "inferred"},
+			"confidence":   {Type: "number"},
+			"tier":         {Type: "string", Default: "archival"},
+			"use_count":    {Type: "number", Default: float64(0)},
+			"needs_review": {Type: "boolean", Default: false},
+		},
+	}
+
+	tests := []struct {
+		name     string
+		props    map[string]any
+		wantConf float64
+	}{
+		{"explicit source", map[string]any{"source": "explicit"}, 1.0},
+		{"corrected source", map[string]any{"source": "corrected"}, 0.9},
+		{"inferred source", map[string]any{"source": "inferred"}, 0.7},
+		{"no source defaults to inferred", map[string]any{}, 0.7},
+		{"preserves existing confidence", map[string]any{"confidence": 0.42}, 0.42},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			applySchemaDefaults(tt.props, schema)
+
+			assert.Equal(t, tt.wantConf, tt.props["confidence"])
+			assert.Equal(t, "archival", tt.props["tier"])
+			assert.Equal(t, float64(0), tt.props["use_count"])
+			assert.Equal(t, false, tt.props["needs_review"])
+		})
+	}
+
+	t.Run("schema without confidence leaves props untouched", func(t *testing.T) {
+		props := map[string]any{"name": "x"}
+		applySchemaDefaults(props, agents.ObjectSchema{
+			Properties: map[string]agents.PropertyDef{"name": {Type: "string"}},
+		})
+		assert.Equal(t, "x", props["name"])
+		assert.NotContains(t, props, "confidence")
+	})
+}
