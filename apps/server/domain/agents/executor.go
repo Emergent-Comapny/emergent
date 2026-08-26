@@ -216,7 +216,7 @@ type AgentExecutor struct {
 	modelFactory   *adk.ModelFactory
 	toolPool       *ToolPool
 	repo           *Repository
-	skillRepo      *skills.Repository
+	skillRepo      skills.SkillRepo
 	embeddingsSvc  *embeddings.Service
 	provisioner    *sandbox.AutoProvisioner // nil if workspaces are disabled
 	wsEnabled      bool                     // cached feature flag

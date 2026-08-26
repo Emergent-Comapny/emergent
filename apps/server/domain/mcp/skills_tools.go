@@ -173,11 +173,14 @@ func (s *Service) executeGetSkill(ctx context.Context, projectID string, args ma
 
 func (s *Service) executeCreateSkill(ctx context.Context, projectID string, args map[string]any) (*ToolResult, error) {
 	name, _ := args["name"].(string)
-	if name == "" {
-		return nil, fmt.Errorf("create_skill: 'name' is required")
-	}
 	description, _ := args["description"].(string)
 	content, _ := args["content"].(string)
+
+	// Shared validation (same rules as the REST handlers).
+	dto := &skills.CreateSkillDTO{Name: name, Description: description, Content: content}
+	if err := skills.ValidateCreateSkill(*dto, s.skillsRepo.MaxContentSize()); err != nil {
+		return nil, fmt.Errorf("create_skill: %w", err)
+	}
 
 	sk := &skills.Skill{
 		Name:        name,
@@ -185,7 +188,7 @@ func (s *Service) executeCreateSkill(ctx context.Context, projectID string, args
 		Content:     content,
 		ProjectID:   &projectID,
 	}
-	if err := s.skillsRepo.Create(ctx, sk, nil); err != nil {
+	if err := s.skillsRepo.Create(ctx, sk); err != nil {
 		return nil, fmt.Errorf("create_skill: %w", err)
 	}
 	return s.wrapResult(sk.ToDTO())
@@ -202,17 +205,20 @@ func (s *Service) executeUpdateSkill(ctx context.Context, args map[string]any) (
 	}
 
 	dto := &skills.UpdateSkillDTO{}
-	descriptionChanged := false
 
 	if v, ok := args["description"].(string); ok {
 		dto.Description = &v
-		descriptionChanged = true
 	}
 	if v, ok := args["content"].(string); ok {
 		dto.Content = &v
 	}
 
-	updated, err := s.skillsRepo.Update(ctx, id, dto, nil, descriptionChanged)
+	// Shared validation (same rules as the REST handlers).
+	if err := skills.ValidateUpdateSkill(*dto, s.skillsRepo.MaxContentSize()); err != nil {
+		return nil, fmt.Errorf("update_skill: %w", err)
+	}
+
+	updated, err := s.skillsRepo.Update(ctx, id, dto)
 	if err != nil {
 		return nil, fmt.Errorf("update_skill: %w", err)
 	}

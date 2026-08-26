@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 
+	sdkerrors "github.com/emergent-company/emergent.memory/apps/server/pkg/sdk/errors"
 	sdkskills "github.com/emergent-company/emergent.memory/apps/server/pkg/sdk/skills"
 	"github.com/emergent-company/emergent.memory/tools/cli/internal/client"
 	"github.com/emergent-company/emergent.memory/tools/cli/internal/skillsfs"
@@ -445,7 +446,21 @@ unless the --confirm flag is provided.`,
 type skillFrontmatter struct {
 	Name        string         `yaml:"name"`
 	Description string         `yaml:"description"`
+	Version     string         `yaml:"version"`
+	License     string         `yaml:"license"`
 	Metadata    map[string]any `yaml:"metadata,omitempty"`
+}
+
+// EffectiveVersion returns the version from the top-level version field,
+// falling back to a nested metadata.version value.
+func (f *skillFrontmatter) EffectiveVersion() string {
+	if f.Version != "" {
+		return f.Version
+	}
+	if v, ok := f.Metadata["version"].(string); ok {
+		return v
+	}
+	return ""
 }
 
 var skillImportCmd = &cobra.Command{
@@ -553,7 +568,7 @@ Import built-in skills including experimental ones:
 			Name:        fm.Name,
 			Description: fm.Description,
 			Content:     content,
-			Metadata:    fm.Metadata,
+			Metadata:    buildSkillImportMetadata(fm.EffectiveVersion(), fm.License, fm.Metadata),
 		}
 
 		var skill *sdkskills.Skill
@@ -563,6 +578,12 @@ Import built-in skills including experimental ones:
 			skill, err = c.SDK.Skills.Create(context.Background(), projectID, req)
 		}
 		if err != nil {
+			// A 409 conflict means a skill with this name already exists in the
+			// target scope — treat the re-run as idempotent (no duplicate).
+			if sdkerrors.IsConflict(err) {
+				fmt.Fprintf(cmd.OutOrStdout(), "Skill %q already exists on the server — nothing to import.\n", fm.Name)
+				return nil
+			}
 			return fmt.Errorf("failed to import skill: %w", err)
 		}
 
@@ -597,12 +618,25 @@ func importFoundSkills(cmd *cobra.Command, c *client.Client, projectID, orgID st
 	}
 	fmt.Fprintln(out)
 
+	// Pre-fetch existing skill names so re-runs match by name and never create
+	// duplicates (idempotent import). A failed list is non-fatal — the 409
+	// conflict path below still guards against duplicates.
+	existing := map[string]bool{}
+	if listErr := listExistingSkillNames(c, projectID, orgID, existing); listErr != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not list existing skills (%v); relying on server-side conflict detection\n", listErr)
+	}
+
 	imported := 0
 	skipped := 0
 	errors := 0
 	var err error
 
 	for _, s := range skills {
+		if existing[s.Name] {
+			fmt.Fprintf(out, "Skipped '%s' (already exists)\n", s.Name)
+			skipped++
+			continue
+		}
 		if !all && isInteractiveTerminal() {
 			promptName := s.Name
 			if s.Experimental {
@@ -623,6 +657,7 @@ func importFoundSkills(cmd *cobra.Command, c *client.Client, projectID, orgID st
 			Name:        s.Name,
 			Description: s.Description,
 			Content:     s.Content,
+			Metadata:    buildSkillImportMetadata(s.Version, s.License, s.Metadata),
 		}
 
 		if orgID != "" {
@@ -631,6 +666,12 @@ func importFoundSkills(cmd *cobra.Command, c *client.Client, projectID, orgID st
 			_, err = c.SDK.Skills.Create(context.Background(), projectID, req)
 		}
 		if err != nil {
+			// Name already exists (matched by name) — idempotent re-run.
+			if sdkerrors.IsConflict(err) {
+				fmt.Fprintf(out, "Skipped '%s' (already exists)\n", s.Name)
+				skipped++
+				continue
+			}
 			fmt.Fprintf(cmd.ErrOrStderr(), "Error importing '%s': %v\n", s.Name, err)
 			errors++
 			continue
@@ -688,8 +729,10 @@ func importFromEmbeddedCatalog(cmd *cobra.Command, c *client.Client, projectID, 
 			Name:         fm.Name,
 			Description:  fm.Description,
 			Version:      fm.EffectiveVersion(),
+			License:      fm.License,
 			Content:      content,
 			Experimental: fm.Experimental,
+			Metadata:     fm.metadataMap(),
 		})
 	}
 
@@ -719,6 +762,48 @@ func resolveSkillContent() (string, error) {
 		return string(data), nil
 	}
 	return skillContentFlag, nil
+}
+
+// buildSkillImportMetadata merges a skill's frontmatter metadata with CLI import
+// provenance. The provenance fields are: source="cli" (always set), plus
+// license/version from the SKILL.md frontmatter when present. Existing
+// frontmatter metadata keys are preserved; explicit top-level license/version
+// override any nested metadata values.
+func buildSkillImportMetadata(version, license string, frontmatterMeta map[string]any) map[string]any {
+	meta := make(map[string]any, len(frontmatterMeta)+3)
+	for k, v := range frontmatterMeta {
+		meta[k] = v
+	}
+	meta["source"] = "cli"
+	if license != "" {
+		meta["license"] = license
+	}
+	if version != "" {
+		meta["version"] = version
+	}
+	return meta
+}
+
+// listExistingSkillNames fills names with the names of skills already present in
+// the target scope (project-scoped, org-scoped, or global). For a project scope
+// this is the merged visible set (project + org + global), matching what the
+// server would consider a name collision.
+func listExistingSkillNames(c *client.Client, projectID, orgID string, names map[string]bool) error {
+	ctx := context.Background()
+	var skills []*sdkskills.Skill
+	var err error
+	if orgID != "" {
+		skills, err = c.SDK.Skills.ListOrgSkills(ctx, orgID)
+	} else {
+		skills, err = c.SDK.Skills.List(ctx, projectID)
+	}
+	if err != nil {
+		return err
+	}
+	for _, s := range skills {
+		names[s.Name] = true
+	}
+	return nil
 }
 
 // parseSkillFile splits a SKILL.md file into YAML frontmatter and body content.

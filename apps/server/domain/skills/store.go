@@ -2,7 +2,9 @@ package skills
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"time"
@@ -15,18 +17,84 @@ import (
 	"github.com/emergent-company/emergent.memory/pkg/pgutils"
 )
 
+// Embedder generates description embeddings for skills.
+// *embeddings.Service implements this interface.
+type Embedder interface {
+	EmbedQuery(ctx context.Context, query string) ([]float32, error)
+}
+
+// RepositoryOption configures a Repository.
+type RepositoryOption func(*Repository)
+
+// WithEmbedder sets the embedding service used to generate description
+// embeddings on every write path (Create/Update).
+func WithEmbedder(e Embedder) RepositoryOption {
+	return func(r *Repository) { r.embedder = e }
+}
+
+// WithMaxContentSize overrides the maximum allowed skill content size in bytes.
+// Values <= 0 fall back to DefaultMaxContentSize.
+func WithMaxContentSize(n int) RepositoryOption {
+	return func(r *Repository) { r.maxContentSize = n }
+}
+
 // Repository handles database operations for kb.skills.
 type Repository struct {
-	db  bun.IDB
-	log *slog.Logger
+	db             bun.IDB
+	log            *slog.Logger
+	embedder       Embedder // nil when embeddings are disabled/unavailable
+	maxContentSize int
 }
 
 // NewRepository creates a new skills repository.
-func NewRepository(db bun.IDB, log *slog.Logger) *Repository {
-	return &Repository{
-		db:  db,
-		log: log.With(logger.Scope("skills.repo")),
+func NewRepository(db bun.IDB, log *slog.Logger, opts ...RepositoryOption) *Repository {
+	r := &Repository{
+		db:             db,
+		log:            log.With(logger.Scope("skills.repo")),
+		maxContentSize: DefaultMaxContentSize,
 	}
+	for _, o := range opts {
+		o(r)
+	}
+	return r
+}
+
+// MaxContentSize returns the configured content size cap (normalized to the
+// default when unset).
+func (r *Repository) MaxContentSize() int {
+	return normalizeMaxContentSize(r.maxContentSize)
+}
+
+// computeContentHash returns the lowercase hex SHA-256 of the given content.
+func computeContentHash(content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(sum[:])
+}
+
+// ensureMetadata guarantees a non-nil metadata object so jsonb writes never
+// produce NULL into the NOT NULL metadata column.
+func ensureMetadata(s *Skill) *SkillMetadata {
+	if s.Metadata == nil {
+		s.Metadata = &SkillMetadata{}
+	}
+	return s.Metadata
+}
+
+// embedDescription generates an embedding for the given text via the configured
+// embedder. On failure (or when no embedder is configured) it logs a warning
+// and returns nil — embedding generation is non-fatal for the skill write.
+func (r *Repository) embedDescription(ctx context.Context, text string) []float32 {
+	if text == "" || r.embedder == nil {
+		return nil
+	}
+	vec, err := r.embedder.EmbedQuery(ctx, text)
+	if err != nil {
+		r.log.Warn("skills: failed to generate description embedding (skill will have no embedding)",
+			logger.Error(err),
+		)
+		return nil
+	}
+	return vec
 }
 
 // FindAll returns skills for listing. Exactly one of projectID or orgID should be set:
@@ -164,8 +232,17 @@ func (r *Repository) FindByID(ctx context.Context, id uuid.UUID) (*Skill, error)
 
 // Create inserts a new skill. Always uses Bun ORM for the INSERT (excluding the vector
 // column to avoid pgx binding issues with vector(768)), then issues a separate raw UPDATE
-// to set description_embedding when an embedding is provided.
-func (r *Repository) Create(ctx context.Context, s *Skill, embedding []float32) error {
+// to set description_embedding when an embedding was generated.
+//
+// The content hash is always computed server-side from s.Content — any caller-provided
+// content_hash is overwritten. The description embedding is generated here so every
+// write path (REST, MCP, CLI, blueprint) shares the same behavior; embedding failure is
+// non-fatal and leaves the embedding null.
+func (r *Repository) Create(ctx context.Context, s *Skill) error {
+	ensureMetadata(s)
+	s.Metadata.ContentHash = computeContentHash(s.Content)
+	embedding := r.embedDescription(ctx, s.Description)
+
 	// Step 1: insert via Bun ORM, skipping the vector column entirely.
 	_, err := r.db.NewInsert().Model(s).ExcludeColumn("description_embedding").Exec(ctx)
 	if err != nil {
@@ -187,9 +264,11 @@ func (r *Repository) Create(ctx context.Context, s *Skill, embedding []float32) 
 	return nil
 }
 
-// Update applies partial updates to an existing skill. If descriptionChanged is true and
-// embedding is non-nil, the embedding is updated via raw SQL.
-func (r *Repository) Update(ctx context.Context, id uuid.UUID, dto *UpdateSkillDTO, embedding []float32, descriptionChanged bool) (*Skill, error) {
+// Update applies partial updates to an existing skill. When content changes the
+// content hash is recomputed server-side; all other provenance fields are
+// preserved verbatim. When the description changes a fresh embedding is
+// generated (non-fatal on failure — the old embedding is cleared as stale).
+func (r *Repository) Update(ctx context.Context, id uuid.UUID, dto *UpdateSkillDTO) (*Skill, error) {
 	// Load existing
 	existing, err := r.FindByID(ctx, id)
 	if err != nil {
@@ -207,22 +286,27 @@ func (r *Repository) Update(ctx context.Context, id uuid.UUID, dto *UpdateSkillD
 	if dto.Metadata != nil {
 		existing.Metadata = dto.Metadata
 	}
+	// content_hash is always server-computed and never trusted from callers
+	// (it is the one metadata field the server owns and may overwrite).
+	ensureMetadata(existing)
+	existing.Metadata.ContentHash = computeContentHash(existing.Content)
 	existing.UpdatedAt = now
 
-	if descriptionChanged && embedding != nil {
-		vectorStr := pgutils.FormatVector(embedding)
-		_, err = r.db.ExecContext(ctx,
-			`UPDATE kb.skills SET description = ?, content = ?, metadata = ?, description_embedding = ?::vector, updated_at = ? WHERE id = ?`,
-			existing.Description, existing.Content, existing.Metadata, vectorStr, now, id,
-		)
-		if err != nil {
-			return nil, r.wrapDBError("failed to update skill", err)
+	descriptionChanged := dto.Description != nil
+	if descriptionChanged {
+		embedding := r.embedDescription(ctx, existing.Description)
+		if embedding != nil {
+			vectorStr := pgutils.FormatVector(embedding)
+			_, err = r.db.ExecContext(ctx,
+				`UPDATE kb.skills SET description = ?, content = ?, metadata = ?, description_embedding = ?::vector, updated_at = ? WHERE id = ?`,
+				existing.Description, existing.Content, existing.Metadata, vectorStr, now, id,
+			)
+			if err != nil {
+				return nil, r.wrapDBError("failed to update skill", err)
+			}
+			return existing, nil
 		}
-		return existing, nil
-	}
-
-	if descriptionChanged && embedding == nil {
-		// Description changed but no embedding available: clear the old embedding
+		// Description changed but no embedding available: clear the old (stale) embedding.
 		_, err = r.db.ExecContext(ctx,
 			`UPDATE kb.skills SET description = ?, content = ?, metadata = ?, description_embedding = NULL, updated_at = ? WHERE id = ?`,
 			existing.Description, existing.Content, existing.Metadata, now, id,

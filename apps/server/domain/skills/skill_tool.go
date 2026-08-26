@@ -24,9 +24,16 @@ const SkillListThreshold = 50
 // exceeds SkillListThreshold.
 const SkillTopK = 10
 
+// SkillRepo is the subset of Repository used by the skill tool and the agent
+// executor (available-skill discovery and semantic retrieval).
+type SkillRepo interface {
+	FindForAgent(ctx context.Context, projectID string, orgID string) ([]*Skill, error)
+	FindRelevant(ctx context.Context, projectID string, orgID string, vec []float32, topK int) ([]*Skill, error)
+}
+
 // SkillToolDeps holds the dependencies needed by BuildSkillTool.
 type SkillToolDeps struct {
-	Repo             *Repository
+	Repo             SkillRepo
 	EmbeddingsSvc    *embeddings.Service
 	Logger           *slog.Logger
 	ProjectID        string

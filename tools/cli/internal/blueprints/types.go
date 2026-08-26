@@ -181,6 +181,8 @@ type SeedResult struct {
 type SkillFile struct {
 	Name        string         `yaml:"name"`
 	Description string         `yaml:"description"`
+	Version     string         `yaml:"version"`
+	License     string         `yaml:"license"`
 	Metadata    map[string]any `yaml:"metadata,omitempty"`
 
 	// Content holds the Markdown body after the closing frontmatter delimiter.

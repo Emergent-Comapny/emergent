@@ -348,7 +348,7 @@ func (b *Blueprinter) createSkill(ctx context.Context, sk SkillFile) BlueprintsR
 		Name:        sk.Name,
 		Description: sk.Description,
 		Content:     sk.Content,
-		Metadata:    sk.Metadata,
+		Metadata:    skillProvenanceMetadata(sk),
 	}
 	// Global skill — empty projectID
 	if _, err := b.skills.Create(ctx, "", req); err != nil {
@@ -364,13 +364,32 @@ func (b *Blueprinter) updateSkill(ctx context.Context, sk SkillFile, skillID str
 	req := &sdkskills.UpdateSkillRequest{
 		Description: &desc,
 		Content:     &content,
-		Metadata:    sk.Metadata,
+		Metadata:    skillProvenanceMetadata(sk),
 	}
 	if _, err := b.skills.Update(ctx, skillID, req); err != nil {
 		return BlueprintsResult{ResourceType: "skill", Name: sk.Name, SourceFile: sk.SourceFile,
 			Action: BlueprintsActionError, Error: fmt.Errorf("update skill: %w", err)}
 	}
 	return BlueprintsResult{ResourceType: "skill", Name: sk.Name, SourceFile: sk.SourceFile, Action: BlueprintsActionUpdated}
+}
+
+// skillProvenanceMetadata merges a skill file's frontmatter metadata with
+// blueprint provenance: source="blueprint" (always set), plus license/version
+// from the SKILL.md frontmatter when present. Existing metadata keys are
+// preserved; explicit top-level license/version override nested metadata values.
+func skillProvenanceMetadata(sk SkillFile) map[string]any {
+	meta := make(map[string]any, len(sk.Metadata)+3)
+	for k, v := range sk.Metadata {
+		meta[k] = v
+	}
+	meta["source"] = "blueprint"
+	if sk.License != "" {
+		meta["license"] = sk.License
+	}
+	if sk.Version != "" {
+		meta["version"] = sk.Version
+	}
+	return meta
 }
 
 // ──────────────────────────────────────────────

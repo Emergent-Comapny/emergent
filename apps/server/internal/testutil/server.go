@@ -141,7 +141,6 @@ func NewTestServerWithLLM(testDB *TestDB) *TestServer {
 	// Shared repositories / services — must match signatures in newTestServerWithDB.
 	encryptionSvc := encryption.NewService(testDB.DB, log)
 	agentRepo := agents.NewRepository(db)
-	skillsRepo := skills.NewRepository(db, log)
 	providerRepo := provider.NewRepository(db, log)
 	eventsSvc := events.NewService(log)
 	apitokenRepo := apitoken.NewRepository(db, log)
@@ -158,6 +157,7 @@ func NewTestServerWithLLM(testDB *TestDB) *TestServer {
 	modelconfigSvc := modelconfig.NewService(modelconfigStore, log)
 	embeddingResolver := modelconfig.NewEmbeddingResolverAdapter(modelconfigSvc, credSvc)
 	embeddingsSvc := embeddings.NewTestEmbeddingsService(embeddingResolver, log)
+	skillsRepo := skills.NewRepository(db, log, skills.WithEmbedder(embeddingsSvc))
 
 	testGraphCfg := &config.Config{}
 	testGraphCfg.Graph.MaxBatchObjects = 500
@@ -469,7 +469,7 @@ func newTestServerWithDB(testDB *TestDB, db bun.IDB) *TestServer {
 	chat.RegisterRoutes(e, chatHandler, authMiddleware)
 
 	// Register MCP routes
-	skillsRepo := skills.NewRepository(db, log)
+	skillsRepo := skills.NewRepository(db, log, skills.WithEmbedder(embeddingsSvc))
 	mcpSvc := mcp.NewService(mcp.ServiceParams{
 		DB:           db,
 		GraphService: graphSvc,
@@ -526,7 +526,9 @@ func newTestServerWithDB(testDB *TestDB, db bun.IDB) *TestServer {
 	schemas.RegisterRoutes(e, schemasHandler, authMiddleware)
 
 	// Register skills routes (skillsRepo already created above for MCP injection)
-	skillsHandler := skills.NewHandler(skillsRepo, embeddingsSvc, log)
+	// superadminRepo gates global skill creation; reuse below for superadmin routes.
+	superadminRepo := superadmin.NewRepository(db)
+	skillsHandler := skills.NewHandler(skillsRepo, log, superadminRepo)
 	skills.RegisterRoutes(e, skillsHandler, authMiddleware)
 
 	// Register user activity routes
@@ -536,7 +538,6 @@ func newTestServerWithDB(testDB *TestDB, db bun.IDB) *TestServer {
 	useractivity.RegisterRoutes(e, useractivityHandler, authMiddleware)
 
 	// Register superadmin routes
-	superadminRepo := superadmin.NewRepository(db)
 	superadminHandler := superadmin.NewHandler(superadminRepo, apitokenSvc)
 	superadmin.RegisterRoutes(e, superadminHandler, authMiddleware)
 

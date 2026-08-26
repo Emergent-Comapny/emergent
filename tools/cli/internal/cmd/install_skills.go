@@ -39,6 +39,23 @@ func (f *SkillFrontmatter) EffectiveVersion() string {
 	return f.Metadata.Version
 }
 
+// metadataMap returns the nested metadata block as a map so it can be passed
+// through as skill provenance metadata. Only non-empty fields are included.
+// Returns nil when the block is empty.
+func (f *SkillFrontmatter) metadataMap() map[string]any {
+	meta := make(map[string]any, 2)
+	if f.Metadata.Version != "" {
+		meta["version"] = f.Metadata.Version
+	}
+	if f.Metadata.Author != "" {
+		meta["author"] = f.Metadata.Author
+	}
+	if len(meta) == 0 {
+		return nil
+	}
+	return meta
+}
+
 var skillNameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$|^[a-z0-9]$`)
 
 // validateSkillFrontmatter checks frontmatter fields against the agentskills.io spec.
@@ -175,8 +192,12 @@ type FoundSkill struct {
 	Name         string
 	Description  string
 	Version      string
+	License      string
 	Content      string
 	Experimental bool
+	// Metadata is the skill's frontmatter metadata block (author, version, …),
+	// passed through verbatim into the stored skill's provenance metadata.
+	Metadata map[string]any
 }
 
 // discoverSkillsInDir scans a directory for SKILL.md files (either directly or
@@ -239,8 +260,10 @@ func loadFoundSkill(skillDir, skillMDPath string) (FoundSkill, error) {
 		Name:         fm.Name,
 		Description:  fm.Description,
 		Version:      fm.EffectiveVersion(),
+		License:      fm.License,
 		Content:      content,
 		Experimental: fm.Experimental,
+		Metadata:     fm.metadataMap(),
 	}, nil
 }
 

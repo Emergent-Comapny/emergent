@@ -3,32 +3,31 @@ package skills
 import (
 	"log/slog"
 	"net/http"
-	"regexp"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
+	"github.com/emergent-company/emergent.memory/domain/superadmin"
 	"github.com/emergent-company/emergent.memory/pkg/apperror"
 	"github.com/emergent-company/emergent.memory/pkg/auth"
-	"github.com/emergent-company/emergent.memory/pkg/embeddings"
 	"github.com/emergent-company/emergent.memory/pkg/logger"
 )
 
-var nameRegex = regexp.MustCompile(NamePattern)
-
 // Handler handles HTTP requests for skills.
 type Handler struct {
-	repo          *Repository
-	embeddingsSvc *embeddings.Service
-	log           *slog.Logger
+	repo *Repository
+	log  *slog.Logger
+	// superadmin gates global skill creation; nil when the superadmin feature is
+	// disabled (global create then falls back to authenticated-user-only).
+	superadmin *superadmin.Repository
 }
 
 // NewHandler creates a new skills handler.
-func NewHandler(repo *Repository, embeddingsSvc *embeddings.Service, log *slog.Logger) *Handler {
+func NewHandler(repo *Repository, log *slog.Logger, superadmin *superadmin.Repository) *Handler {
 	return &Handler{
-		repo:          repo,
-		embeddingsSvc: embeddingsSvc,
-		log:           log.With(logger.Scope("skills.handler")),
+		repo:       repo,
+		log:        log.With(logger.Scope("skills.handler")),
+		superadmin: superadmin,
 	}
 }
 
@@ -81,11 +80,22 @@ func (h *Handler) CreateGlobalSkill(c echo.Context) error {
 		return apperror.ErrUnauthorized
 	}
 
+	// Creating a global skill requires superadmin privileges.
+	if h.superadmin != nil {
+		ok, _, err := h.superadmin.IsSuperadmin(c.Request().Context(), user.ID)
+		if err != nil {
+			return apperror.NewInternal("failed to check superadmin status", err)
+		}
+		if !ok {
+			return apperror.ErrForbidden
+		}
+	}
+
 	var dto CreateSkillDTO
 	if err := c.Bind(&dto); err != nil {
 		return apperror.ErrBadRequest.WithMessage("invalid request body")
 	}
-	if err := validateSkillName(dto.Name); err != nil {
+	if err := ValidateCreateSkill(dto, h.repo.MaxContentSize()); err != nil {
 		return err
 	}
 
@@ -98,9 +108,7 @@ func (h *Handler) CreateGlobalSkill(c echo.Context) error {
 		OrgID:       nil,
 	}
 
-	embedding := h.generateEmbedding(c, dto.Description)
-
-	if err := h.repo.Create(c.Request().Context(), skill, embedding); err != nil {
+	if err := h.repo.Create(c.Request().Context(), skill); err != nil {
 		return err
 	}
 
@@ -167,14 +175,11 @@ func (h *Handler) UpdateSkill(c echo.Context) error {
 	if err := c.Bind(&dto); err != nil {
 		return apperror.ErrBadRequest.WithMessage("invalid request body")
 	}
-
-	var embedding []float32
-	descriptionChanged := dto.Description != nil
-	if descriptionChanged {
-		embedding = h.generateEmbedding(c, *dto.Description)
+	if err := ValidateUpdateSkill(dto, h.repo.MaxContentSize()); err != nil {
+		return err
 	}
 
-	skill, err := h.repo.Update(c.Request().Context(), id, &dto, embedding, descriptionChanged)
+	skill, err := h.repo.Update(c.Request().Context(), id, &dto)
 	if err != nil {
 		return err
 	}
@@ -277,7 +282,7 @@ func (h *Handler) CreateOrgSkill(c echo.Context) error {
 	if err := c.Bind(&dto); err != nil {
 		return apperror.ErrBadRequest.WithMessage("invalid request body")
 	}
-	if err := validateSkillName(dto.Name); err != nil {
+	if err := ValidateCreateSkill(dto, h.repo.MaxContentSize()); err != nil {
 		return err
 	}
 
@@ -290,9 +295,7 @@ func (h *Handler) CreateOrgSkill(c echo.Context) error {
 		OrgID:       &orgID,
 	}
 
-	embedding := h.generateEmbedding(c, dto.Description)
-
-	if err := h.repo.Create(c.Request().Context(), skill, embedding); err != nil {
+	if err := h.repo.Create(c.Request().Context(), skill); err != nil {
 		return err
 	}
 
@@ -403,7 +406,7 @@ func (h *Handler) CreateProjectSkill(c echo.Context) error {
 	if err := c.Bind(&dto); err != nil {
 		return apperror.ErrBadRequest.WithMessage("invalid request body")
 	}
-	if err := validateSkillName(dto.Name); err != nil {
+	if err := ValidateCreateSkill(dto, h.repo.MaxContentSize()); err != nil {
 		return err
 	}
 
@@ -416,9 +419,7 @@ func (h *Handler) CreateProjectSkill(c echo.Context) error {
 		OrgID:       nil,
 	}
 
-	embedding := h.generateEmbedding(c, dto.Description)
-
-	if err := h.repo.Create(c.Request().Context(), skill, embedding); err != nil {
+	if err := h.repo.Create(c.Request().Context(), skill); err != nil {
 		return err
 	}
 
@@ -463,20 +464,6 @@ func (h *Handler) DeleteProjectSkill(c echo.Context) error {
 
 // --- Helpers ---
 
-// validateSkillName checks that the name matches the slug pattern and length constraints.
-func validateSkillName(name string) error {
-	if name == "" {
-		return apperror.ErrValidation.WithMessage("name is required")
-	}
-	if len(name) > 64 {
-		return apperror.ErrValidation.WithMessage("name must be 64 characters or fewer")
-	}
-	if !nameRegex.MatchString(name) {
-		return apperror.ErrValidation.WithMessage("name must be a lowercase alphanumeric slug (e.g. my-skill)")
-	}
-	return nil
-}
-
 // parseSkillID extracts and parses the :id path parameter.
 func parseSkillID(c echo.Context) (uuid.UUID, error) {
 	idStr := c.Param("id")
@@ -488,20 +475,4 @@ func parseSkillID(c echo.Context) (uuid.UUID, error) {
 		return uuid.Nil, apperror.ErrBadRequest.WithMessage("invalid skill ID")
 	}
 	return id, nil
-}
-
-// generateEmbedding attempts to generate an embedding for the given text.
-// On failure it logs a warning and returns nil (non-fatal).
-func (h *Handler) generateEmbedding(c echo.Context, text string) []float32 {
-	if text == "" {
-		return nil
-	}
-	vec, err := h.embeddingsSvc.EmbedQuery(c.Request().Context(), text)
-	if err != nil {
-		h.log.Warn("skills: failed to generate description embedding (skill will have no embedding)",
-			logger.Error(err),
-		)
-		return nil
-	}
-	return vec
 }

@@ -71,6 +71,9 @@ type Config struct {
 	// Graph knowledge base configuration
 	Graph GraphConfig
 
+	// Skills configuration
+	Skills SkillsConfig
+
 	// AppURL is the base URL of the application frontend (used for invite links in emails).
 	// In production this is https://memory.emergent-company.ai; set APP_URL to override.
 	AppURL string `env:"APP_URL" envDefault:"https://memory.emergent-company.ai"`
@@ -458,6 +461,22 @@ type GraphConfig struct {
 	// DefaultListLimit is the default number of items returned by list endpoints when no limit is specified.
 	// Default: 100.
 	DefaultListLimit int `env:"GRAPH_DEFAULT_LIST_LIMIT" envDefault:"100"`
+}
+
+// SkillsConfig holds configuration for the skills domain.
+type SkillsConfig struct {
+	// MaxContentSizeBytes is the maximum allowed skill content size in bytes.
+	// Default: 1 MiB (1048576). Values <= 0 fall back to the default.
+	MaxContentSizeBytes int `env:"SKILL_MAX_CONTENT_SIZE_BYTES" envDefault:"1048576"`
+}
+
+// MaxContentSize returns the effective content size cap (normalized to the
+// default when unset or non-positive).
+func (s SkillsConfig) MaxContentSize() int {
+	if s.MaxContentSizeBytes <= 0 {
+		return 1 << 20
+	}
+	return s.MaxContentSizeBytes
 }
 
 // AgentSafeguardsConfig holds configuration for agent queue explosion safeguards.

@@ -11,6 +11,15 @@ import (
 // NamePattern is the validation regex for skill names: lowercase alphanumeric slugs with hyphens.
 const NamePattern = `^[a-z0-9]+(-[a-z0-9]+)*$`
 
+// Provenance source values for SkillMetadata.Source.
+const (
+	SourceManual      = "manual"
+	SourceCLI         = "cli"
+	SourceBlueprint   = "blueprint"
+	SourceAgent       = "agent"
+	SourceMarketplace = "marketplace"
+)
+
 // Skill represents a row in kb.skills.
 type Skill struct {
 	bun.BaseModel `bun:"table:kb.skills,alias:s"`
@@ -30,6 +39,16 @@ type Skill struct {
 // SkillMetadata holds optional metadata fields stored as JSONB.
 type SkillMetadata struct {
 	Location string `json:"location,omitempty"` // source file path (e.g. from import)
+
+	// Provenance fields. These are preserved verbatim by the server on update and
+	// never inferred or overwritten, with the exception of ContentHash which is
+	// always computed server-side from the skill content at write time.
+	Source      string `json:"source,omitempty"`       // manual | cli | blueprint | agent | marketplace
+	License     string `json:"license,omitempty"`      // SPDX identifier or free text
+	Version     string `json:"version,omitempty"`      // skill version string
+	SourceURL   string `json:"source_url,omitempty"`   // URL the skill was imported from
+	OriginID    string `json:"origin_id,omitempty"`    // external identifier of the source skill
+	ContentHash string `json:"content_hash,omitempty"` // SHA-256 of content, computed server-side
 }
 
 // Scan implements sql.Scanner for SkillMetadata.
