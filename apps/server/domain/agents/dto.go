@@ -309,6 +309,7 @@ type AgentDefinitionDTO struct {
 	AutoLoadSkills bool                  `json:"autoLoadSkills"`
 	FlowType       AgentFlowType         `json:"flowType"`
 	IsDefault      bool                  `json:"isDefault"`
+	Enabled        bool                  `json:"enabled"`
 	MaxSteps       *int                  `json:"maxSteps,omitempty"`
 	DefaultTimeout *int                  `json:"defaultTimeout,omitempty"`
 	Visibility     AgentVisibility       `json:"visibility"`
@@ -334,6 +335,7 @@ type AgentDefinitionSummaryDTO struct {
 	FlowType         AgentFlowType   `json:"flowType"`
 	Visibility       AgentVisibility `json:"visibility"`
 	IsDefault        bool            `json:"isDefault"`
+	Enabled          bool            `json:"enabled"`
 	ToolCount        int             `json:"toolCount"`
 	HasSandboxConfig bool            `json:"hasSandboxConfig"`
 	CreatedAt        time.Time       `json:"createdAt"`
@@ -352,6 +354,7 @@ type CreateAgentDefinitionDTO struct {
 	AutoLoadSkills *bool                 `json:"autoLoadSkills"`
 	FlowType       AgentFlowType         `json:"flowType"`
 	IsDefault      *bool                 `json:"isDefault"`
+	Enabled        *bool                 `json:"enabled"`
 	MaxSteps       *int                  `json:"maxSteps"`
 	DefaultTimeout *int                  `json:"defaultTimeout"`
 	Visibility     AgentVisibility       `json:"visibility"`
@@ -374,6 +377,7 @@ type UpdateAgentDefinitionDTO struct {
 	AutoLoadSkills *bool                 `json:"autoLoadSkills"`
 	FlowType       *AgentFlowType        `json:"flowType"`
 	IsDefault      *bool                 `json:"isDefault"`
+	Enabled        *bool                 `json:"enabled"`
 	MaxSteps       *int                  `json:"maxSteps"`
 	DefaultTimeout *int                  `json:"defaultTimeout"`
 	Visibility     *AgentVisibility      `json:"visibility"`
@@ -436,6 +440,7 @@ func (d *AgentDefinition) ToDTO() *AgentDefinitionDTO {
 		AutoLoadSkills: d.AutoLoadSkills,
 		FlowType:       d.FlowType,
 		IsDefault:      d.IsDefault,
+		Enabled:        d.Enabled,
 		MaxSteps:       d.MaxSteps,
 		DefaultTimeout: d.DefaultTimeout,
 		Visibility:     d.Visibility,
@@ -459,6 +464,7 @@ func (d *AgentDefinition) ToSummaryDTO() *AgentDefinitionSummaryDTO {
 		FlowType:         d.FlowType,
 		Visibility:       d.Visibility,
 		IsDefault:        d.IsDefault,
+		Enabled:          d.Enabled,
 		ToolCount:        len(d.Tools),
 		HasSandboxConfig: len(d.SandboxConfig) > 0,
 		CreatedAt:        d.CreatedAt,

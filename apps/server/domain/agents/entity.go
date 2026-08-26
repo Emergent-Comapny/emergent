@@ -341,6 +341,7 @@ type AgentDefinition struct {
 	AutoLoadSkills   bool              `bun:"auto_load_skills,notnull,default:false" json:"autoLoadSkills"`
 	FlowType         AgentFlowType     `bun:"flow_type,notnull,default:'single'" json:"flowType"`
 	IsDefault        bool              `bun:"is_default,notnull,default:false" json:"isDefault"`
+	Enabled          bool              `bun:"enabled,notnull,default:true" json:"enabled"`
 	MaxSteps         *int              `bun:"max_steps" json:"maxSteps,omitempty"`
 	DefaultTimeout   *int              `bun:"default_timeout" json:"defaultTimeout,omitempty"`
 	MaxSessionEvents *int              `bun:"max_session_events" json:"maxSessionEvents,omitempty"`

@@ -1420,6 +1420,11 @@ func (h *Handler) CreateDefinition(c echo.Context) error {
 		isDefault = *dto.IsDefault
 	}
 
+	enabled := true
+	if dto.Enabled != nil {
+		enabled = *dto.Enabled
+	}
+
 	tools := dto.Tools
 	if tools == nil {
 		tools = []string{}
@@ -1452,6 +1457,7 @@ func (h *Handler) CreateDefinition(c echo.Context) error {
 		AutoLoadSkills: dto.AutoLoadSkills != nil && *dto.AutoLoadSkills,
 		FlowType:       flowType,
 		IsDefault:      isDefault,
+		Enabled:        enabled,
 		MaxSteps:       dto.MaxSteps,
 		DefaultTimeout: dto.DefaultTimeout,
 		Visibility:     visibility,
@@ -1543,6 +1549,9 @@ func (h *Handler) UpdateDefinition(c echo.Context) error {
 	}
 	if dto.IsDefault != nil {
 		def.IsDefault = *dto.IsDefault
+	}
+	if dto.Enabled != nil {
+		def.Enabled = *dto.Enabled
 	}
 	if dto.MaxSteps != nil {
 		def.MaxSteps = dto.MaxSteps
