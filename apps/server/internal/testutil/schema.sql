@@ -441,7 +441,8 @@ CREATE TABLE kb.agent_definitions (
     banned_tools text[],
     auto_load_skills boolean DEFAULT false NOT NULL,
     max_session_events integer,
-    tool_policies jsonb DEFAULT '{}'::jsonb NOT NULL
+    tool_policies jsonb DEFAULT '{}'::jsonb NOT NULL,
+    enabled boolean DEFAULT true NOT NULL
 );
 
 
