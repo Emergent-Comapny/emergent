@@ -20,6 +20,14 @@ Installs the `code-structure` schema pack — maps the structural and architectu
 memory blueprints install github.com/emergent-company/emergent.memory/blueprints/code-memory-blueprint --project <slug>
 ```
 
+### [blueprint-architect](./blueprint-architect/)
+
+A dedicated authoring agent that designs and emits Emergent blueprints — object types, relationship types, agent definitions, and seed data — for a project, registers the schema live, and produces a reusable blueprint directory.
+
+```bash
+memory blueprints install github.com/emergent-company/emergent.memory/blueprints/blueprint-architect --project <slug>
+```
+
 ## Using blueprints
 
 ```bash
