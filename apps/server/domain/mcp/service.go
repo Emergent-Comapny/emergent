@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -3640,7 +3639,9 @@ func (s *Service) executeBatchCreateEntities(ctx context.Context, projectID stri
 	}
 
 	return s.wrapResult(map[string]any{
-		"success": successCount,
+		"ok":      failedCount == 0,
+		"created": successCount,
+		"success": successCount, // deprecated: was an int count; use "created"
 		"failed":  failedCount,
 		"total":   len(entitiesRaw),
 		"results": results,
@@ -3813,7 +3814,9 @@ func (s *Service) executeBatchCreateRelationships(ctx context.Context, projectID
 	}
 
 	return s.wrapResult(map[string]any{
-		"success": successCount,
+		"ok":      failedCount == 0,
+		"created": successCount,
+		"success": successCount, // deprecated: was an int count; use "created"
 		"failed":  failedCount,
 		"total":   len(relationshipsRaw),
 		"results": results,
@@ -5002,43 +5005,33 @@ func (s *Service) executeRemember(ctx context.Context, projectID string, args ma
 		return &ToolResult{Content: []ContentBlock{{Type: "text", Text: text}}}, nil
 	}
 
-	// Collect SSE events
-	var parts []string
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "" || payload == "[DONE]" {
-			continue
-		}
-		var chunk map[string]any
-		if json.Unmarshal([]byte(payload), &chunk) != nil {
-			continue
-		}
-		switch chunk["type"] {
-		case "token":
-			if token, ok := chunk["token"].(string); ok {
-				parts = append(parts, token)
-			}
-		case "done":
-			if summary, ok := chunk["summary"].(string); ok && summary != "" {
-				parts = append(parts, "\nSummary: "+summary)
-			}
-		case "error":
-			if errMsg, ok := chunk["error"].(string); ok {
-				return nil, fmt.Errorf("remember: %s", errMsg)
-			}
-		}
+	// Sync mode returns a 200 JSON body {run_id, status, summary, document_id}
+	// (NOT SSE — only "stream" mode streams). Decode it directly so the run_id
+	// and summary are preserved for remember-status(run_id).
+	var syncResp struct {
+		RunID      string `json:"run_id"`
+		Status     string `json:"status"`
+		Summary    string `json:"summary"`
+		DocumentID string `json:"document_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&syncResp); err != nil {
+		return nil, fmt.Errorf("remember: failed to decode sync response: %w", err)
 	}
 
-	text := strings.Join(parts, "")
-	if text == "" {
-		text = "Remember completed — call remember-status(run_id) to see what was created"
+	var parts []string
+	if syncResp.RunID != "" {
+		parts = append(parts, fmt.Sprintf("Remember completed (run_id: %s)", syncResp.RunID))
+	} else {
+		parts = append(parts, "Remember completed")
 	}
-	return &ToolResult{Content: []ContentBlock{{Type: "text", Text: text}}}, nil
+	if syncResp.Status != "" {
+		parts = append(parts, "status: "+syncResp.Status)
+	}
+	if syncResp.Summary != "" {
+		parts = append(parts, "Summary: "+syncResp.Summary)
+	}
+	parts = append(parts, "call remember-status(run_id) to see what was created")
+	return &ToolResult{Content: []ContentBlock{{Type: "text", Text: strings.Join(parts, "\n")}}}, nil
 }
 
 // executeForget wraps the /forget REST endpoint as an MCP tool.
@@ -5107,40 +5100,30 @@ func (s *Service) executeForget(ctx context.Context, projectID string, args map[
 		return &ToolResult{Content: []ContentBlock{{Type: "text", Text: text}}}, nil
 	}
 
-	var parts []string
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "" || payload == "[DONE]" {
-			continue
-		}
-		var chunk map[string]any
-		if json.Unmarshal([]byte(payload), &chunk) != nil {
-			continue
-		}
-		switch chunk["type"] {
-		case "token":
-			if token, ok := chunk["token"].(string); ok {
-				parts = append(parts, token)
-			}
-		case "done":
-			if summary, ok := chunk["summary"].(string); ok && summary != "" {
-				parts = append(parts, "\nSummary: "+summary)
-			}
-		case "error":
-			if errMsg, ok := chunk["error"].(string); ok {
-				return nil, fmt.Errorf("forget: %s", errMsg)
-			}
-		}
+	// Sync mode returns a 200 JSON body {run_id, status, summary} (NOT SSE —
+	// only "stream" mode streams). Decode it directly so the run_id and
+	// summary are preserved for remember-status(run_id).
+	var syncResp struct {
+		RunID   string `json:"run_id"`
+		Status  string `json:"status"`
+		Summary string `json:"summary"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&syncResp); err != nil {
+		return nil, fmt.Errorf("forget: failed to decode sync response: %w", err)
 	}
 
-	text := strings.Join(parts, "")
-	if text == "" {
-		text = "Forget completed — call remember-status(run_id) to see what was created"
+	var parts []string
+	if syncResp.RunID != "" {
+		parts = append(parts, fmt.Sprintf("Forget completed (run_id: %s)", syncResp.RunID))
+	} else {
+		parts = append(parts, "Forget completed")
 	}
-	return &ToolResult{Content: []ContentBlock{{Type: "text", Text: text}}}, nil
+	if syncResp.Status != "" {
+		parts = append(parts, "status: "+syncResp.Status)
+	}
+	if syncResp.Summary != "" {
+		parts = append(parts, "Summary: "+syncResp.Summary)
+	}
+	parts = append(parts, "call remember-status(run_id) to see what was removed")
+	return &ToolResult{Content: []ContentBlock{{Type: "text", Text: strings.Join(parts, "\n")}}}, nil
 }
