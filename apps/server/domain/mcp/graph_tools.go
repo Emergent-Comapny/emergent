@@ -105,6 +105,11 @@ func (s *Service) executeHybridSearch(ctx context.Context, projectID string, arg
 		return nil, fmt.Errorf("missing required parameter: query")
 	}
 
+	opts := responseOptsFromArgs(args)
+	if opts.FieldStrategy == "" {
+		opts.FieldStrategy = "compact"
+	}
+
 	limit := 20
 	if l, ok := args["limit"].(float64); ok {
 		limit = int(l)
@@ -179,7 +184,7 @@ func (s *Service) executeHybridSearch(ctx context.Context, projectID string, arg
 				"project_id", projectID,
 			)
 		} else {
-			return s.wrapResult(s.mapUnifiedToSearchResponse(res, types, labels, allowedTypes, blockedTypes))
+			return s.wrapResultCompact(slimSearchResponse(s.mapUnifiedToSearchResponse(res, types, labels, allowedTypes, blockedTypes), opts))
 		}
 	}
 
@@ -225,7 +230,7 @@ func (s *Service) executeHybridSearch(ctx context.Context, projectID string, arg
 	results.Data = filtered
 	results.Total = len(filtered)
 
-	return s.wrapResult(results)
+	return s.wrapResultCompact(slimSearchResponse(results, opts))
 }
 
 // mapUnifiedToSearchResponse converts unified search results back to graph.SearchResponse
@@ -340,6 +345,11 @@ func (s *Service) executeSemanticSearch(ctx context.Context, projectID string, a
 		return nil, fmt.Errorf("missing required parameter: query")
 	}
 
+	opts := responseOptsFromArgs(args)
+	if opts.FieldStrategy == "" {
+		opts.FieldStrategy = "compact"
+	}
+
 	limit := 20
 	if l, ok := args["limit"].(float64); ok {
 		limit = int(l)
@@ -387,7 +397,7 @@ func (s *Service) executeSemanticSearch(ctx context.Context, projectID string, a
 			s.log.WarnContext(ctx, "unified search failed in semantic_search, falling back",
 				"error", err, "project_id", projectID)
 		} else {
-			return s.wrapResult(s.mapUnifiedToSearchResponse(res, types, nil, allowedTypes, blockedTypes))
+			return s.wrapResultCompact(slimSearchResponse(s.mapUnifiedToSearchResponse(res, types, nil, allowedTypes, blockedTypes), opts))
 		}
 	}
 
@@ -421,7 +431,7 @@ func (s *Service) executeSemanticSearch(ctx context.Context, projectID string, a
 	results.Data = filtered
 	results.Total = len(filtered)
 
-	return s.wrapResult(results)
+	return s.wrapResultCompact(slimSearchResponse(results, opts))
 }
 
 // executeFindSimilar finds entities similar to a given entity
@@ -466,6 +476,11 @@ func (s *Service) executeFindSimilar(ctx context.Context, projectID string, args
 		typeFilter = &types[0]
 	}
 
+	opts := responseOptsFromArgs(args)
+	if opts.FieldStrategy == "" {
+		opts.FieldStrategy = "compact"
+	}
+
 	req := &graph.SimilarObjectsRequest{
 		Type:  typeFilter,
 		Limit: limit,
@@ -476,10 +491,11 @@ func (s *Service) executeFindSimilar(ctx context.Context, projectID string, args
 		return nil, fmt.Errorf("find similar: %w", err)
 	}
 
-	return s.wrapResult(map[string]any{
-		"similar_entities": results,
-		"total":            len(results),
-	})
+	items := make([]map[string]any, 0, len(results))
+	for _, r := range results {
+		items = append(items, slimSimilarResult(r, opts))
+	}
+	return s.wrapResultCompact(map[string]any{"similar_entities": items, "total": len(items)})
 }
 
 // executeTraverseGraph performs multi-hop graph traversal
@@ -548,6 +564,11 @@ func (s *Service) executeTraverseGraph(ctx context.Context, projectID string, ar
 		queryContext = qc
 	}
 
+	opts := responseOptsFromArgs(args)
+	if opts.FieldStrategy == "" {
+		opts.FieldStrategy = "compact"
+	}
+
 	req := &graph.TraverseGraphRequest{
 		RootIDs:           []uuid.UUID{startEntityID},
 		MaxDepth:          maxDepth,
@@ -561,7 +582,7 @@ func (s *Service) executeTraverseGraph(ctx context.Context, projectID string, ar
 		return nil, fmt.Errorf("traverse graph: %w", err)
 	}
 
-	return s.wrapResult(results)
+	return s.wrapResultCompact(slimTraverseResponse(results, opts))
 }
 
 // executeListRelationships lists relationships with optional filters
@@ -607,12 +628,26 @@ func (s *Service) executeListRelationships(ctx context.Context, projectID string
 		params.DstID = &id
 	}
 
+	opts := responseOptsFromArgs(args)
+
 	results, err := s.graphService.ListRelationships(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("list relationships: %w", err)
 	}
 
-	return s.wrapResult(results)
+	data := make([]map[string]any, 0, len(results.Items))
+	for _, r := range results.Items {
+		data = append(data, slimRelationship(r, opts))
+	}
+	out := map[string]any{
+		"data":     data,
+		"total":    results.Total,
+		"has_more": results.NextCursor != nil,
+	}
+	if opts.Verbose && results.NextCursor != nil {
+		out["next_cursor"] = *results.NextCursor
+	}
+	return s.wrapResultCompact(out)
 }
 
 // executeUpdateRelationship updates a relationship
@@ -643,15 +678,16 @@ func (s *Service) executeUpdateRelationship(ctx context.Context, projectID strin
 		req.Weight = &w
 	}
 
+	opts := responseOptsFromArgs(args)
+
 	result, err := s.graphService.PatchRelationship(ctx, projectUUID, relID, req)
 	if err != nil {
 		return nil, fmt.Errorf("update relationship: %w", err)
 	}
 
-	return s.wrapResult(map[string]any{
+	return s.wrapResultCompact(map[string]any{
 		"success":      true,
-		"relationship": result,
-		"message":      "Relationship updated successfully",
+		"relationship": slimRelationship(result, opts),
 	})
 }
 
@@ -678,15 +714,14 @@ func (s *Service) executeDeleteRelationship(ctx context.Context, projectID strin
 		reason = &r
 	}
 
-	result, err := s.graphService.DeleteRelationship(ctx, projectUUID, relID, nil, reason)
+	_, err = s.graphService.DeleteRelationship(ctx, projectUUID, relID, nil, reason)
 	if err != nil {
 		return nil, fmt.Errorf("delete relationship: %w", err)
 	}
 
-	return s.wrapResult(map[string]any{
-		"success":      true,
-		"relationship": result,
-		"message":      "Relationship deleted successfully",
+	return s.wrapResultCompact(map[string]any{
+		"success":         true,
+		"relationship_id": relID.String(),
 	})
 }
 

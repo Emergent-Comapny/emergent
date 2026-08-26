@@ -362,13 +362,22 @@ func (s *Service) GetToolDefinitions() []ToolDefinition {
 		},
 		{
 			Name:        "entity-history",
-			Description: "Get the version history of an entity by canonical ID or key. Returns a list of versions with their physical IDs, version numbers, and timestamps. Use entity-query with ids=[physical_id] to fetch the full properties of a specific historical version.",
+			Description: "Get the version history of an entity by canonical ID or key. Returns a list of versions with their physical IDs, version numbers, and timestamps. Use entity-query with ids=[physical_id] to fetch the full properties of a specific historical version. Returns a slim object (id/type/key/name/labels); pass verbose=true for full metadata and field_strategy/full for properties.",
 			InputSchema: InputSchema{
 				Type: "object",
 				Properties: map[string]PropertySchema{
 					"entity_id": {
 						Type:        "string",
 						Description: "The canonical UUID or key of the entity to get history for",
+					},
+					"fields": {
+						Type:        "array",
+						Description: "Optional list of property field names to return from the properties blob (e.g. [\"method\",\"path\"]). id, type, key, name are always returned. Omit to return all properties (only when field_strategy=\"full\").",
+						Items:       &PropertySchema{Type: "string"},
+					},
+					"verbose": {
+						Type:        "boolean",
+						Description: "When true, include non-typical metadata: score breakdown, timestamps, versioning, branch, external-sync fields. Default false.",
 					},
 				},
 				Required: []string{"entity_id"},
@@ -650,7 +659,7 @@ func (s *Service) GetToolDefinitions() []ToolDefinition {
 		},
 		{
 			Name:        "entity-update",
-			Description: "Update an existing entity by creating a new version. Properties are merged with existing values (null removes a property).",
+			Description: "Update an existing entity by creating a new version. Properties are merged with existing values (null removes a property). Returns a slim object (id/type/key/name/labels); pass verbose=true for full metadata and field_strategy/full for properties.",
 			InputSchema: InputSchema{
 				Type: "object",
 				Properties: map[string]PropertySchema{
@@ -678,6 +687,10 @@ func (s *Service) GetToolDefinitions() []ToolDefinition {
 						Type:        "string",
 						Description: "Optional branch name or UUID. If set, the update is applied in this branch.",
 					},
+					"verbose": {
+						Type:        "boolean",
+						Description: "When true, include non-typical metadata: score breakdown, timestamps, versioning, branch, external-sync fields. Default false.",
+					},
 				},
 				Required: []string{"entity_id"},
 			},
@@ -702,13 +715,17 @@ func (s *Service) GetToolDefinitions() []ToolDefinition {
 		},
 		{
 			Name:        "entity-restore",
-			Description: "Restore a soft-deleted entity.",
+			Description: "Restore a soft-deleted entity. Returns a slim object (id/type/key/name/labels); pass verbose=true for full metadata and field_strategy/full for properties.",
 			InputSchema: InputSchema{
 				Type: "object",
 				Properties: map[string]PropertySchema{
 					"entity_id": {
 						Type:        "string",
 						Description: "UUID or key of the entity to restore",
+					},
+					"verbose": {
+						Type:        "boolean",
+						Description: "When true, include non-typical metadata: score breakdown, timestamps, versioning, branch, external-sync fields. Default false.",
 					},
 				},
 				Required: []string{"entity_id"},
@@ -808,7 +825,7 @@ func (s *Service) GetToolDefinitions() []ToolDefinition {
 		},
 		{
 			Name:        "search-hybrid",
-			Description: "Advanced search combining full-text, semantic similarity, and graph context. Most powerful search option for AI agents. Supports optional recency and access-frequency ranking boosts. By default only searches types with no namespace; pass namespace to target a specific namespace or \"all\" for everything.",
+			Description: "Advanced search combining full-text, semantic similarity, and graph context. Most powerful search option for AI agents. Supports optional recency and access-frequency ranking boosts. By default only searches types with no namespace; pass namespace to target a specific namespace or \"all\" for everything. Returns a slim object (id/type/key/name/labels); pass verbose=true for full metadata and field_strategy/full for properties.",
 			InputSchema: InputSchema{
 				Type: "object",
 				Properties: map[string]PropertySchema{
@@ -847,13 +864,27 @@ func (s *Service) GetToolDefinitions() []ToolDefinition {
 						Type:        "number",
 						Description: "Boost score by how recently the object was accessed. 0 = disabled (default). Typical range: 0.5–2.0.",
 					},
+					"fields": {
+						Type:        "array",
+						Description: "Optional list of property field names to return from the properties blob (e.g. [\"method\",\"path\"]). id, type, key, name are always returned. Omit to return all properties (only when field_strategy=\"full\").",
+						Items:       &PropertySchema{Type: "string"},
+					},
+					"verbose": {
+						Type:        "boolean",
+						Description: "When true, include non-typical metadata: score breakdown, timestamps, versioning, branch, external-sync fields. Default false.",
+					},
+					"field_strategy": {
+						Type:        "string",
+						Description: "Controls property depth. minimal=no properties/name, compact=name only (default), full=all properties.",
+						Enum:        []string{"minimal", "compact", "full"},
+					},
 				},
 				Required: []string{"query"},
 			},
 		},
 		{
 			Name:        "search-semantic",
-			Description: "Search entities by semantic meaning using vector embeddings. Finds conceptually similar entities even with different wording. By default only searches types with no namespace; pass namespace to target a specific namespace or \"all\" for everything.",
+			Description: "Search entities by semantic meaning using vector embeddings. Finds conceptually similar entities even with different wording. By default only searches types with no namespace; pass namespace to target a specific namespace or \"all\" for everything. Returns a slim object (id/type/key/name/labels); pass verbose=true for full metadata and field_strategy/full for properties.",
 			InputSchema: InputSchema{
 				Type: "object",
 				Properties: map[string]PropertySchema{
@@ -876,13 +907,27 @@ func (s *Service) GetToolDefinitions() []ToolDefinition {
 						Maximum:     intPtr(50),
 						Default:     20,
 					},
+					"fields": {
+						Type:        "array",
+						Description: "Optional list of property field names to return from the properties blob (e.g. [\"method\",\"path\"]). id, type, key, name are always returned. Omit to return all properties (only when field_strategy=\"full\").",
+						Items:       &PropertySchema{Type: "string"},
+					},
+					"verbose": {
+						Type:        "boolean",
+						Description: "When true, include non-typical metadata: score breakdown, timestamps, versioning, branch, external-sync fields. Default false.",
+					},
+					"field_strategy": {
+						Type:        "string",
+						Description: "Controls property depth. minimal=no properties/name, compact=name only (default), full=all properties.",
+						Enum:        []string{"minimal", "compact", "full"},
+					},
 				},
 				Required: []string{"query"},
 			},
 		},
 		{
 			Name:        "search-similar",
-			Description: "Find entities similar to a given entity based on semantic similarity.",
+			Description: "Find entities similar to a given entity based on semantic similarity. Returns a slim object (id/type/key/name/labels); pass verbose=true for full metadata and field_strategy/full for properties.",
 			InputSchema: InputSchema{
 				Type: "object",
 				Properties: map[string]PropertySchema{
@@ -901,13 +946,22 @@ func (s *Service) GetToolDefinitions() []ToolDefinition {
 						Maximum:     intPtr(50),
 						Default:     10,
 					},
+					"verbose": {
+						Type:        "boolean",
+						Description: "When true, include non-typical metadata: score breakdown, timestamps, versioning, branch, external-sync fields. Default false.",
+					},
+					"field_strategy": {
+						Type:        "string",
+						Description: "Controls property depth. minimal=no properties/name, compact=name only (default), full=all properties.",
+						Enum:        []string{"minimal", "compact", "full"},
+					},
 				},
 				Required: []string{"entity_id"},
 			},
 		},
 		{
 			Name:        "graph-traverse",
-			Description: "Multi-hop graph traversal starting from an entity. Discover non-obvious connections and relationships.",
+			Description: "Multi-hop graph traversal starting from an entity. Discover non-obvious connections and relationships. Returns a slim object (id/type/key/name/labels); pass verbose=true for full metadata and field_strategy/full for properties.",
 			InputSchema: InputSchema{
 				Type: "object",
 				Properties: map[string]PropertySchema{
@@ -936,13 +990,27 @@ func (s *Service) GetToolDefinitions() []ToolDefinition {
 						Type:        "string",
 						Description: "Optional search query to prioritize edges by relevance during traversal. When provided, edges at each BFS level are sorted by semantic similarity to this query.",
 					},
+					"field_strategy": {
+						Type:        "string",
+						Description: "Controls property depth. minimal=no properties/name, compact=name only (default), full=all properties.",
+						Enum:        []string{"minimal", "compact", "full"},
+					},
+					"fields": {
+						Type:        "array",
+						Description: "Optional list of property field names to return from the properties blob (e.g. [\"method\",\"path\"]). id, type, key, name are always returned. Omit to return all properties (only when field_strategy=\"full\").",
+						Items:       &PropertySchema{Type: "string"},
+					},
+					"verbose": {
+						Type:        "boolean",
+						Description: "When true, include non-typical metadata: score breakdown, timestamps, versioning, branch, external-sync fields. Default false.",
+					},
 				},
 				Required: []string{"start_entity_id"},
 			},
 		},
 		{
 			Name:        "relationship-list",
-			Description: "Query relationships with optional filters. Returns paginated list of relationships in the knowledge graph.",
+			Description: "Query relationships with optional filters. Returns paginated list of relationships in the knowledge graph. Returns a slim object (id/type/key/name/labels); pass verbose=true for full metadata and field_strategy/full for properties.",
 			InputSchema: InputSchema{
 				Type: "object",
 				Properties: map[string]PropertySchema{
@@ -965,13 +1033,22 @@ func (s *Service) GetToolDefinitions() []ToolDefinition {
 						Maximum:     intPtr(100),
 						Default:     50,
 					},
+					"fields": {
+						Type:        "array",
+						Description: "Optional list of property field names to return from the properties blob (e.g. [\"method\",\"path\"]). id, type, key, name are always returned. Omit to return all properties (only when field_strategy=\"full\").",
+						Items:       &PropertySchema{Type: "string"},
+					},
+					"verbose": {
+						Type:        "boolean",
+						Description: "When true, include non-typical metadata: score breakdown, timestamps, versioning, branch, external-sync fields. Default false.",
+					},
 				},
 				Required: []string{},
 			},
 		},
 		{
 			Name:        "relationship-update",
-			Description: "Update an existing relationship's properties or weight.",
+			Description: "Update an existing relationship's properties or weight. Returns a slim object (id/type/key/name/labels); pass verbose=true for full metadata and field_strategy/full for properties.",
 			InputSchema: InputSchema{
 				Type: "object",
 				Properties: map[string]PropertySchema{
@@ -986,6 +1063,10 @@ func (s *Service) GetToolDefinitions() []ToolDefinition {
 					"weight": {
 						Type:        "number",
 						Description: "Optional new weight for the relationship",
+					},
+					"verbose": {
+						Type:        "boolean",
+						Description: "When true, include non-typical metadata: score breakdown, timestamps, versioning, branch, external-sync fields. Default false.",
 					},
 				},
 				Required: []string{"relationship_id"},
@@ -2668,10 +2749,14 @@ func (s *Service) executeEntityHistory(ctx context.Context, projectID string, ar
 		}
 	}
 
+	opts := responseOptsFromArgs(args)
 	result := map[string]any{
 		"entity_id": entityIDStr,
 		"versions":  versions,
 		"count":     len(versions),
+	}
+	if opts.Verbose {
+		result["canonical_id"] = canonicalID.String()
 	}
 	return s.wrapResult(result)
 }
@@ -3185,10 +3270,10 @@ func (s *Service) executeUpdateEntity(ctx context.Context, projectID string, arg
 		return nil, fmt.Errorf("update entity: %w", err)
 	}
 
-	return s.wrapResult(map[string]any{
+	opts := responseOptsFromArgs(args)
+	return s.wrapResultCompact(map[string]any{
 		"success": true,
-		"entity":  result,
-		"message": "Entity updated successfully",
+		"entity":  slimEntity(result, opts),
 	})
 }
 
@@ -3223,9 +3308,9 @@ func (s *Service) executeDeleteEntity(ctx context.Context, projectID string, arg
 		return nil, fmt.Errorf("delete entity: %w", err)
 	}
 
-	return s.wrapResult(map[string]any{
-		"success": true,
-		"message": "Entity deleted successfully",
+	return s.wrapResultCompact(map[string]any{
+		"success":   true,
+		"entity_id": entityID.String(),
 	})
 }
 
@@ -3255,10 +3340,10 @@ func (s *Service) executeRestoreEntity(ctx context.Context, projectID string, ar
 		return nil, fmt.Errorf("restore entity: %w", err)
 	}
 
-	return s.wrapResult(map[string]any{
+	opts := responseOptsFromArgs(args)
+	return s.wrapResultCompact(map[string]any{
 		"success": true,
-		"entity":  result,
-		"message": "Entity restored successfully",
+		"entity":  slimEntity(result, opts),
 	})
 }
 
@@ -3408,7 +3493,6 @@ func (s *Service) executeGraphBranchDelete(ctx context.Context, projectID string
 //	    {"type": "has_result", "target_id": "<existing-entity-id>", "properties": {}}
 //	  ]
 //	}
-//
 func (s *Service) executeBatchCreateEntities(ctx context.Context, projectID string, args map[string]any) (*ToolResult, error) {
 	projectUUID, err := uuid.Parse(projectID)
 	if err != nil {
