@@ -742,7 +742,7 @@ func (tp *ToolPool) wrapSingleTool(projectID string, td mcp.ToolDefinition) (too
 // convertToolResult converts an MCP ToolResult to a map for the ADK function tool response.
 func convertToolResult(result *mcp.ToolResult) (map[string]any, error) {
 	if result != nil && len(result.Content) > 0 {
-		// If the external tool reported an error, include that flag
+		// If the external tool reported an error, surface a uniform ok=false.
 		if result.IsError {
 			var textParts []string
 			for _, block := range result.Content {
@@ -754,7 +754,7 @@ func convertToolResult(result *mcp.ToolResult) (map[string]any, error) {
 			if len(textParts) > 0 {
 				errMsg = textParts[0]
 			}
-			return map[string]any{"error": errMsg}, nil
+			return map[string]any{"ok": false, "error": errMsg}, nil
 		}
 
 		var textParts []string
@@ -764,17 +764,22 @@ func convertToolResult(result *mcp.ToolResult) (map[string]any, error) {
 			}
 		}
 		if len(textParts) == 1 {
-			// Try to parse as JSON first
+			// Try to parse as JSON first. Preserve a tool-provided "ok" field
+			// (e.g. entity-create's ok=failed==0); otherwise add a uniform
+			// ok=true so consumers can classify success generically.
 			var parsed map[string]any
 			if err := json.Unmarshal([]byte(textParts[0]), &parsed); err == nil {
+				if _, has := parsed["ok"]; !has {
+					parsed["ok"] = true
+				}
 				return parsed, nil
 			}
-			return map[string]any{"result": textParts[0]}, nil
+			return map[string]any{"ok": true, "result": textParts[0]}, nil
 		}
-		return map[string]any{"results": textParts}, nil
+		return map[string]any{"ok": true, "results": textParts}, nil
 	}
 
-	return map[string]any{"result": "ok"}, nil
+	return map[string]any{"ok": true, "result": "ok"}, nil
 }
 
 // CallTool executes a tool by name directly, bypassing the ADK runner loop.
