@@ -2787,10 +2787,10 @@
 <h2 id="step-1-create-an-agent-definition">Step 1 — Create an Agent Definition<a class="headerlink" href="#step-1-create-an-agent-definition" title="Permanent link">&para;</a></h2>
 <p>The definition controls <em>what</em> the agent does.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>memory<span class="w"> </span>defs<span class="w"> </span>create<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>--name<span class="w"> </span><span class="s2">&quot;document-summarizer&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>--system-prompt<span class="w"> </span><span class="s2">&quot;You are an expert at summarizing technical documents. Extract key points and write a concise summary.&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span>--model<span class="w"> </span><span class="s2">&quot;gemini-2.0-flash&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span>--tools<span class="w"> </span><span class="s2">&quot;search,graph_query,graph_create_object&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>--name<span class="w"> </span><span class="s2">"document-summarizer"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>--system-prompt<span class="w"> </span><span class="s2">"You are an expert at summarizing technical documents. Extract key points and write a concise summary."</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span>--model<span class="w"> </span><span class="s2">"gemini-2.0-flash"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span>--tools<span class="w"> </span><span class="s2">"search,graph_query,graph_create_object"</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span>--flow-type<span class="w"> </span>single<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span>--visibility<span class="w"> </span>project<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">  </span>--max-steps<span class="w"> </span><span class="m">20</span>
@@ -2841,29 +2841,29 @@
 <div class="tabbed-content">
 <div class="tabbed-block">
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>memory<span class="w"> </span>agents<span class="w"> </span>create<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>--name<span class="w"> </span><span class="s2">&quot;doc-summarizer&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>--name<span class="w"> </span><span class="s2">"doc-summarizer"</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>--trigger-type<span class="w"> </span>manual
 </code></pre></div>
 </div>
 <div class="tabbed-block">
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>memory<span class="w"> </span>agents<span class="w"> </span>create<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--name<span class="w"> </span><span class="s2">&quot;nightly-report&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--name<span class="w"> </span><span class="s2">"nightly-report"</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>--trigger-type<span class="w"> </span>schedule<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span>--cron<span class="w"> </span><span class="s2">&quot;0 0 2 * * *&quot;</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span>--cron<span class="w"> </span><span class="s2">"0 0 2 * * *"</span>
 </code></pre></div>
 <p>Cron format: <code>sec min hour dom month dow</code> (6-field).</p>
 </div>
 <div class="tabbed-block">
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>memory<span class="w"> </span>agents<span class="w"> </span>create<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>--name<span class="w"> </span><span class="s2">&quot;auto-tagger&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>--name<span class="w"> </span><span class="s2">"auto-tagger"</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>--trigger-type<span class="w"> </span>reaction<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>--reaction-events<span class="w"> </span><span class="s2">&quot;created,updated&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span>--reaction-object-types<span class="w"> </span><span class="s2">&quot;document&quot;</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>--reaction-events<span class="w"> </span><span class="s2">"created,updated"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span>--reaction-object-types<span class="w"> </span><span class="s2">"document"</span>
 </code></pre></div>
 </div>
 <div class="tabbed-block">
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>memory<span class="w"> </span>agents<span class="w"> </span>create<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--name<span class="w"> </span><span class="s2">&quot;ci-trigger&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--name<span class="w"> </span><span class="s2">"ci-trigger"</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>--trigger-type<span class="w"> </span>webhook
 </code></pre></div>
 <p>See <a href="#webhook-hooks">Webhook Hooks</a> below for the token setup.</p>
@@ -2896,14 +2896,14 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>memory<span class="w"> </span>agents<span class="w"> </span>questions<span class="w"> </span>list-project<span class="w"> </span>--status<span class="w"> </span>pending
 </code></pre></div>
 <h3 id="respond-to-resume-execution">Respond to resume execution<a class="headerlink" href="#respond-to-resume-execution" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>memory<span class="w"> </span>agents<span class="w"> </span>questions<span class="w"> </span>respond<span class="w"> </span>&lt;question-id&gt;<span class="w"> </span><span class="s2">&quot;My answer here&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>memory<span class="w"> </span>agents<span class="w"> </span>questions<span class="w"> </span>respond<span class="w"> </span>&lt;question-id&gt;<span class="w"> </span><span class="s2">"My answer here"</span>
 </code></pre></div>
 <hr />
 <h2 id="webhook-hooks">Webhook Hooks<a class="headerlink" href="#webhook-hooks" title="Permanent link">&para;</a></h2>
 <p>Webhooks let external systems (CI/CD, GitHub Actions) trigger an agent via HTTP.</p>
 <h3 id="create-a-hook">Create a hook<a class="headerlink" href="#create-a-hook" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>memory<span class="w"> </span>agents<span class="w"> </span>hooks<span class="w"> </span>create<span class="w"> </span>&lt;agent-id&gt;<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span>--label<span class="w"> </span><span class="s2">&quot;GitHub Actions&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span>--label<span class="w"> </span><span class="s2">"GitHub Actions"</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span>--rate-limit<span class="w"> </span><span class="m">30</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">  </span>--burst-size<span class="w"> </span><span class="m">5</span>
 </code></pre></div>
@@ -2913,7 +2913,7 @@
 </div>
 <h3 id="trigger-from-an-external-system">Trigger from an external system<a class="headerlink" href="#trigger-from-an-external-system" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>https://api.dev.emergent-company.ai/api/webhooks/agents/&lt;hook-id&gt;<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer &lt;token&gt;&quot;</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer &lt;token&gt;"</span>
 </code></pre></div>
 <h3 id="manage-hooks">Manage hooks<a class="headerlink" href="#manage-hooks" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>memory<span class="w"> </span>agents<span class="w"> </span>hooks<span class="w"> </span>list<span class="w"> </span>&lt;agent-id&gt;
@@ -2969,13 +2969,13 @@
 <h3 id="opt-in-via-the-agent-definition">Opt in via the agent definition<a class="headerlink" href="#opt-in-via-the-agent-definition" title="Permanent link">&para;</a></h3>
 <p>Add <code>"skill"</code> to the agent's tools list:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>memory<span class="w"> </span>defs<span class="w"> </span>create<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span>--name<span class="w"> </span><span class="s2">&quot;onboarding-agent&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span>--system-prompt<span class="w"> </span><span class="s2">&quot;You onboard new team members. Use the skill tool to load relevant playbooks.&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">  </span>--model<span class="w"> </span><span class="s2">&quot;gemini-2.0-flash&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">  </span>--tools<span class="w"> </span><span class="s2">&quot;skill,graph_query,graph_create_object&quot;</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span>--name<span class="w"> </span><span class="s2">"onboarding-agent"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span>--system-prompt<span class="w"> </span><span class="s2">"You onboard new team members. Use the skill tool to load relevant playbooks."</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">  </span>--model<span class="w"> </span><span class="s2">"gemini-2.0-flash"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">  </span>--tools<span class="w"> </span><span class="s2">"skill,graph_query,graph_create_object"</span>
 </code></pre></div>
 <p>Or update an existing definition:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>memory<span class="w"> </span>defs<span class="w"> </span>update<span class="w"> </span>&lt;definition-id&gt;<span class="w"> </span>--tools<span class="w"> </span><span class="s2">&quot;skill,search,graph_query&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>memory<span class="w"> </span>defs<span class="w"> </span>update<span class="w"> </span>&lt;definition-id&gt;<span class="w"> </span>--tools<span class="w"> </span><span class="s2">"skill,search,graph_query"</span>
 </code></pre></div>
 <h3 id="manage-skills-via-the-cli">Manage skills via the CLI<a class="headerlink" href="#manage-skills-via-the-cli" title="Permanent link">&para;</a></h3>
 <p>Skills use a lowercase slug name (e.g. <code>my-skill</code>, max 64 characters).</p>
@@ -2985,14 +2985,14 @@
 </code></pre></div>
 <p><strong>Create a skill</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>memory<span class="w"> </span>skills<span class="w"> </span>create<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">  </span>--name<span class="w"> </span><span class="s2">&quot;deploy-checklist&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">  </span>--description<span class="w"> </span><span class="s2">&quot;Step-by-step deployment checklist for production releases&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">  </span>--name<span class="w"> </span><span class="s2">"deploy-checklist"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">  </span>--description<span class="w"> </span><span class="s2">"Step-by-step deployment checklist for production releases"</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">  </span>--content-file<span class="w"> </span>./deploy-checklist.md
 <a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>
 <a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="c1"># Project-scoped (overrides a global skill with the same name within this project)</span>
 <a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>memory<span class="w"> </span>skills<span class="w"> </span>create<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="w">  </span>--name<span class="w"> </span><span class="s2">&quot;deploy-checklist&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="w">  </span>--description<span class="w"> </span><span class="s2">&quot;Custom deploy steps for this project&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="w">  </span>--name<span class="w"> </span><span class="s2">"deploy-checklist"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="w">  </span>--description<span class="w"> </span><span class="s2">"Custom deploy steps for this project"</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="w">  </span>--content-file<span class="w"> </span>./my-deploy.md<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="w">  </span>--project<span class="w"> </span>&lt;project-id&gt;
 </code></pre></div>
@@ -3013,7 +3013,7 @@
 </code></pre></div>
 <p><strong>Get, update, delete</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>memory<span class="w"> </span>skills<span class="w"> </span>get<span class="w"> </span>&lt;id&gt;
-<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>memory<span class="w"> </span>skills<span class="w"> </span>update<span class="w"> </span>&lt;id&gt;<span class="w"> </span>--description<span class="w"> </span><span class="s2">&quot;Updated description&quot;</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>memory<span class="w"> </span>skills<span class="w"> </span>update<span class="w"> </span>&lt;id&gt;<span class="w"> </span>--description<span class="w"> </span><span class="s2">"Updated description"</span>
 <a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>memory<span class="w"> </span>skills<span class="w"> </span>update<span class="w"> </span>&lt;id&gt;<span class="w"> </span>--content-file<span class="w"> </span>./new-content.md
 <a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>memory<span class="w"> </span>skills<span class="w"> </span>delete<span class="w"> </span>&lt;id&gt;
 <a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>memory<span class="w"> </span>skills<span class="w"> </span>delete<span class="w"> </span>&lt;id&gt;<span class="w"> </span>--confirm<span class="w">   </span><span class="c1"># skip confirmation prompt</span>
@@ -3044,16 +3044,16 @@
 <h3 id="seed-from-existing-skillmd-files">Seed from existing SKILL.md files<a class="headerlink" href="#seed-from-existing-skillmd-files" title="Permanent link">&para;</a></h3>
 <p>If you have existing <code>.agents/skills/*/SKILL.md</code> files following the OpenCode format, import them all at once:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="k">for</span><span class="w"> </span>f<span class="w"> </span><span class="k">in</span><span class="w"> </span>.agents/skills/*/SKILL.md<span class="p">;</span><span class="w"> </span><span class="k">do</span>
-<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="w">  </span>memory<span class="w"> </span>skills<span class="w"> </span>import<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$f</span><span class="s2">&quot;</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="w">  </span>memory<span class="w"> </span>skills<span class="w"> </span>import<span class="w"> </span><span class="s2">"</span><span class="nv">$f</span><span class="s2">"</span>
 <a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="k">done</span>
 </code></pre></div>
 <hr />
 <h2 id="multi-agent-coordination">Multi-Agent Coordination<a class="headerlink" href="#multi-agent-coordination" title="Permanent link">&para;</a></h2>
 <p>Set <code>--flow-type coordinator</code> to create an orchestrator agent that can spawn sub-agents via the <code>spawn_agents</code> tool:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>memory<span class="w"> </span>defs<span class="w"> </span>create<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="w">  </span>--name<span class="w"> </span><span class="s2">&quot;research-coordinator&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="w">  </span>--name<span class="w"> </span><span class="s2">"research-coordinator"</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="w">  </span>--flow-type<span class="w"> </span>coordinator<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="w">  </span>--tools<span class="w"> </span><span class="s2">&quot;spawn_agents,list_available_agents,graph_query&quot;</span>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="w">  </span>--tools<span class="w"> </span><span class="s2">"spawn_agents,list_available_agents,graph_query"</span>
 </code></pre></div>
 <p>The coordinator discovers available agents with <code>list_available_agents</code> and delegates work to them. Each sub-agent run is linked to the parent via <code>parentRunId</code>.</p>
 <hr />
@@ -3104,12 +3104,12 @@
 <h3 id="configure-via-the-api">Configure via the API<a class="headerlink" href="#configure-via-the-api" title="Permanent link">&para;</a></h3>
 <p>Include <code>nativeTools</code> in the <code>model</code> object when creating or updating a definition:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="p">{</span>
-<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="w">  </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;web-researcher&quot;</span><span class="p">,</span>
-<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="w">  </span><span class="nt">&quot;systemPrompt&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;You are a research assistant. Use web search to find current information.&quot;</span><span class="p">,</span>
-<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="w">  </span><span class="nt">&quot;model&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="w">    </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;gemini-2.5-flash-preview-0514&quot;</span><span class="p">,</span>
-<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="w">    </span><span class="nt">&quot;temperature&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">1.0</span><span class="p">,</span>
-<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="w">    </span><span class="nt">&quot;nativeTools&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;google_search&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;url_context&quot;</span><span class="p">]</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"web-researcher"</span><span class="p">,</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="w">  </span><span class="nt">"systemPrompt"</span><span class="p">:</span><span class="w"> </span><span class="s2">"You are a research assistant. Use web search to find current information."</span><span class="p">,</span>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="w">  </span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="w">    </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"gemini-2.5-flash-preview-0514"</span><span class="p">,</span>
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="w">    </span><span class="nt">"temperature"</span><span class="p">:</span><span class="w"> </span><span class="mf">1.0</span><span class="p">,</span>
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="w">    </span><span class="nt">"nativeTools"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"google_search"</span><span class="p">,</span><span class="w"> </span><span class="s2">"url_context"</span><span class="p">]</span>
 <a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="w">  </span><span class="p">}</span>
 <a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a><span class="p">}</span>
 </code></pre></div>
@@ -3226,7 +3226,7 @@
 <a id="__codelineno-26-14" name="__codelineno-26-14" href="#__codelineno-26-14"></a>
 <a id="__codelineno-26-15" name="__codelineno-26-15" href="#__codelineno-26-15"></a><span class="c1"># Human-in-the-loop</span>
 <a id="__codelineno-26-16" name="__codelineno-26-16" href="#__codelineno-26-16"></a>memory<span class="w"> </span>agents<span class="w"> </span>questions<span class="w"> </span>list-project<span class="w"> </span><span class="o">[</span>--status<span class="w"> </span>pending<span class="o">]</span>
-<a id="__codelineno-26-17" name="__codelineno-26-17" href="#__codelineno-26-17"></a>memory<span class="w"> </span>agents<span class="w"> </span>questions<span class="w"> </span>respond<span class="w"> </span>&lt;question-id&gt;<span class="w"> </span><span class="s2">&quot;&lt;answer&gt;&quot;</span>
+<a id="__codelineno-26-17" name="__codelineno-26-17" href="#__codelineno-26-17"></a>memory<span class="w"> </span>agents<span class="w"> </span>questions<span class="w"> </span>respond<span class="w"> </span>&lt;question-id&gt;<span class="w"> </span><span class="s2">"&lt;answer&gt;"</span>
 <a id="__codelineno-26-18" name="__codelineno-26-18" href="#__codelineno-26-18"></a>
 <a id="__codelineno-26-19" name="__codelineno-26-19" href="#__codelineno-26-19"></a><span class="c1"># Webhook hooks</span>
 <a id="__codelineno-26-20" name="__codelineno-26-20" href="#__codelineno-26-20"></a>memory<span class="w"> </span>agents<span class="w"> </span>hooks<span class="w"> </span>list<span class="w"> </span>&lt;agent-id&gt;

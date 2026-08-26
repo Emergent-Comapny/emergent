@@ -2388,7 +2388,7 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>INFO  scheduler: task started name=RevisionCountRefreshTask
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>INFO  scheduler: task completed name=RevisionCountRefreshTask duration=1.2s
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>WARN  scheduler: task exceeded timeout name=TagCleanupTask duration=30m0s
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>ERROR scheduler: task failed name=StaleJobCleanupTask error=&quot;context canceled&quot;
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>ERROR scheduler: task failed name=StaleJobCleanupTask error="context canceled"
 </code></pre></div>
 <p>The scheduler itself starts and stops gracefully with the server (via <code>fx</code> lifecycle hooks). On shutdown, the scheduler waits for any in-progress task to complete or be cancelled before the process exits.</p>
 
