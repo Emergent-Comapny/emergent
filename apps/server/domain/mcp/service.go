@@ -641,6 +641,14 @@ func (s *Service) GetToolDefinitions() []ToolDefinition {
 						Type:        "string",
 						Description: "Optional branch name or UUID. If set, entities are created in this branch instead of the main graph.",
 					},
+					"check_similar": {
+						Type:        "boolean",
+						Description: "When true, before creating each entity run a vector similarity check scoped to the same entity type. If a near-duplicate (score >= similarity_threshold) already exists, that entity is NOT created and is returned in the 'similar' array instead.",
+					},
+					"similarity_threshold": {
+						Type:        "number",
+						Description: "Cosine similarity cutoff (0.0-1.0) for near-duplicate detection. Defaults to the project setting (category 'entity_create', key 'similarity_threshold'), then 0.85. Only used when check_similar is true.",
+					},
 				},
 				Required: []string{"entities"},
 			},
@@ -3513,6 +3521,67 @@ func generateEntityKey(typeName string, props map[string]any) string {
 	return typeSlug + "-" + hex.EncodeToString(h.Sum(nil))[:12]
 }
 
+const (
+	entityCreateSettingsCategory = "entity_create"
+	entityCreateSimilarityKey    = "similarity_threshold"
+	defaultSimilarityThreshold   = 0.85
+)
+
+// readSimilarityThreshold reads the project-level near-duplicate threshold from
+// kb.project_settings (category entity_create, key similarity_threshold, value {"value": <float>}).
+// Falls back to defaultSimilarityThreshold when unset or invalid.
+func (s *Service) readSimilarityThreshold(ctx context.Context, projectID string) float64 {
+	if s.db == nil {
+		return defaultSimilarityThreshold
+	}
+	var raw string
+	err := s.db.NewSelect().
+		ColumnExpr("value::text").
+		TableExpr("kb.project_settings").
+		Where("project_id = ?", projectID).
+		Where("category = ?", entityCreateSettingsCategory).
+		Where("key = ?", entityCreateSimilarityKey).
+		Scan(ctx, &raw)
+	if err != nil || raw == "" {
+		return defaultSimilarityThreshold
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return defaultSimilarityThreshold
+	}
+	if v, ok := m["value"].(float64); ok && v > 0 && v <= 1 {
+		return v
+	}
+	return defaultSimilarityThreshold
+}
+
+// buildEntityEmbedText flattens type + key + properties into a deterministic
+// string for embedding. Sorted property keys mirror generateEntityKey.
+func buildEntityEmbedText(typeName string, key *string, properties map[string]any) string {
+	var b strings.Builder
+	b.WriteString(typeName)
+	if key != nil && *key != "" {
+		b.WriteString(" ")
+		b.WriteString(*key)
+	}
+	keys := make([]string, 0, len(properties))
+	for k := range properties {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v, err := json.Marshal(properties[k])
+		if err != nil {
+			continue
+		}
+		b.WriteString(" ")
+		b.WriteString(k)
+		b.WriteString(": ")
+		b.WriteString(string(v))
+	}
+	return b.String()
+}
+
 // executeBatchCreateEntities creates one or more entities. Always expects an "entities" array.
 // Backward-compat: if flat fields (type, properties, etc.) are passed instead, wraps them as a single-element array.
 //
@@ -3557,6 +3626,14 @@ func (s *Service) executeBatchCreateEntities(ctx context.Context, projectID stri
 		return nil, fmt.Errorf("batch size exceeded: maximum 100 entities per request")
 	}
 
+	checkSimilar, _ := args["check_similar"].(bool)
+	threshold := defaultSimilarityThreshold
+	if t, ok := args["similarity_threshold"].(float64); ok && t > 0 && t <= 1 {
+		threshold = t
+	} else if checkSimilar {
+		threshold = s.readSimilarityThreshold(ctx, projectID)
+	}
+
 	// slimEntity is the minimal response for a created entity.
 	type slimRelationship struct {
 		ID       string `json:"id"`
@@ -3575,10 +3652,20 @@ func (s *Service) executeBatchCreateEntities(ctx context.Context, projectID stri
 		Error   string      `json:"error,omitempty"`
 		Index   int         `json:"index"`
 	}
+	type similarEntity struct {
+		EntityID   string  `json:"entity_id"`
+		Key        string  `json:"key"`
+		Type       string  `json:"type"`
+		Content    string  `json:"content,omitempty"`
+		Similarity float64 `json:"similarity"`
+		Suggested  string  `json:"suggested"`
+	}
 
 	results := make([]batchResult, 0, len(entitiesRaw))
 	successCount := 0
 	failedCount := 0
+	similarResults := make([]similarEntity, 0)
+	similarCount := 0
 	// keyToID maps entity key → canonical UUID for entities created in this batch.
 	// Used to resolve inline relationship source/target by key within the same call.
 	keyToID := make(map[string]uuid.UUID)
@@ -3639,6 +3726,35 @@ func (s *Service) executeBatchCreateEntities(ctx context.Context, projectID stri
 		if key == nil {
 			k := generateEntityKey(typeName, properties)
 			key = &k
+		}
+
+		if checkSimilar {
+			embedText := buildEntityEmbedText(typeName, key, properties)
+			sr, err := s.graphService.VectorSearchByText(ctx, projectUUID, embedText, &graph.VectorSearchRequest{
+				Types:    []string{typeName},
+				BranchID: branchID,
+				Limit:    1,
+			})
+			if err != nil {
+				s.log.Warn("similarity check failed; proceeding with create", "type", typeName, logger.Error(err))
+			} else if len(sr.Data) > 0 && sr.Data[0].Object != nil && float64(sr.Data[0].Score) >= threshold {
+				best := sr.Data[0].Object
+				var bestKey string
+				if best.Key != nil {
+					bestKey = *best.Key
+				}
+				content, _ := best.Properties["content"].(string)
+				similarResults = append(similarResults, similarEntity{
+					EntityID:   best.CanonicalID.String(),
+					Key:        bestKey,
+					Type:       best.Type,
+					Content:    content,
+					Similarity: float64(sr.Data[0].Score),
+					Suggested:  "edit_existing",
+				})
+				similarCount++
+				continue
+			}
 		}
 
 		// status flows through properties JSONB; the graph layer syncs the
@@ -3765,14 +3881,24 @@ func (s *Service) executeBatchCreateEntities(ctx context.Context, projectID stri
 		successCount++
 	}
 
+	plural := "ies"
+	if similarCount == 1 {
+		plural = "y"
+	}
+	message := fmt.Sprintf("Batch create completed: %d created, %d failed, %d near-duplicate", successCount, failedCount, similarCount)
+	if similarCount > 0 {
+		message = fmt.Sprintf("%d near-duplicate entit%s found. Prefer entity-update(entity_id=…) to enrich the existing object instead of creating a duplicate. Re-call with check_similar=false to force-create.", similarCount, plural)
+	}
 	return s.wrapResult(map[string]any{
-		"ok":      failedCount == 0,
-		"created": successCount,
-		"success": successCount, // deprecated: was an int count; use "created"
-		"failed":  failedCount,
-		"total":   len(entitiesRaw),
-		"results": results,
-		"message": fmt.Sprintf("Batch create completed: %d succeeded, %d failed", successCount, failedCount),
+		"ok":            failedCount == 0,
+		"created":       successCount,
+		"success":       successCount, // deprecated: was an int count; use "created"
+		"failed":        failedCount,
+		"similar":       similarResults,
+		"similar_count": similarCount,
+		"total":         len(entitiesRaw),
+		"results":       results,
+		"message":       message,
 	})
 }
 

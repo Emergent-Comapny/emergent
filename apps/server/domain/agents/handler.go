@@ -3187,3 +3187,90 @@ func (h *Handler) DeleteAgentOverride(c echo.Context) error {
 	msg := fmt.Sprintf("Override for %s deleted — agent will use canonical defaults", agentName)
 	return c.JSON(http.StatusOK, APIResponse[any]{Success: true, Message: &msg})
 }
+
+// --- Generic Project Settings Handlers (key/value config) ---
+
+// GetProjectSetting handles GET /api/projects/:projectId/settings/:category/:key
+func (h *Handler) GetProjectSetting(c echo.Context) error {
+	user := auth.GetUser(c)
+	if user == nil {
+		return apperror.ErrUnauthorized
+	}
+	projectID := c.Param("projectId")
+	if projectID == "" {
+		projectID = user.ProjectID
+	}
+	if projectID == "" {
+		return apperror.NewBadRequest("projectId is required")
+	}
+	category := c.Param("category")
+	key := c.Param("key")
+	if category == "" || key == "" {
+		return apperror.NewBadRequest("category and key are required")
+	}
+	setting, err := h.repo.GetProjectSetting(c.Request().Context(), projectID, category, key)
+	if err != nil {
+		return apperror.NewInternal("failed to get project setting", err)
+	}
+	if setting == nil {
+		return apperror.NewNotFound("ProjectSetting", category+"/"+key)
+	}
+	return c.JSON(http.StatusOK, SuccessResponse(setting))
+}
+
+// SetProjectSetting handles PUT /api/projects/:projectId/settings/:category/:key
+func (h *Handler) SetProjectSetting(c echo.Context) error {
+	user := auth.GetUser(c)
+	if user == nil {
+		return apperror.ErrUnauthorized
+	}
+	projectID := c.Param("projectId")
+	if projectID == "" {
+		projectID = user.ProjectID
+	}
+	if projectID == "" {
+		return apperror.NewBadRequest("projectId is required")
+	}
+	category := c.Param("category")
+	key := c.Param("key")
+	if category == "" || key == "" {
+		return apperror.NewBadRequest("category and key are required")
+	}
+	var value map[string]any
+	if err := c.Bind(&value); err != nil {
+		return apperror.NewBadRequest("invalid request body: expected a JSON object")
+	}
+	setting, err := h.repo.UpsertProjectSetting(c.Request().Context(), projectID, category, key, value)
+	if err != nil {
+		return apperror.NewInternal("failed to set project setting", err)
+	}
+	return c.JSON(http.StatusOK, SuccessResponse(setting))
+}
+
+// DeleteProjectSetting handles DELETE /api/projects/:projectId/settings/:category/:key
+func (h *Handler) DeleteProjectSetting(c echo.Context) error {
+	user := auth.GetUser(c)
+	if user == nil {
+		return apperror.ErrUnauthorized
+	}
+	projectID := c.Param("projectId")
+	if projectID == "" {
+		projectID = user.ProjectID
+	}
+	if projectID == "" {
+		return apperror.NewBadRequest("projectId is required")
+	}
+	category := c.Param("category")
+	key := c.Param("key")
+	if category == "" || key == "" {
+		return apperror.NewBadRequest("category and key are required")
+	}
+	deleted, err := h.repo.DeleteProjectSetting(c.Request().Context(), projectID, category, key)
+	if err != nil {
+		return apperror.NewInternal("failed to delete project setting", err)
+	}
+	if !deleted {
+		return apperror.NewNotFound("ProjectSetting", category+"/"+key)
+	}
+	return c.JSON(http.StatusOK, SuccessResponse(map[string]bool{"deleted": true}))
+}

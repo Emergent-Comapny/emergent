@@ -2272,6 +2272,24 @@ func (s *Service) VectorSearch(ctx context.Context, projectID uuid.UUID, req *Ve
 	}, nil
 }
 
+// VectorSearchByText embeds a text query and runs vector similarity search over
+// graph objects. Reuses VectorSearch so it inherits the same type/status/label/
+// branch filters and returns Score = 1.0 - Distance per result.
+func (s *Service) VectorSearchByText(ctx context.Context, projectID uuid.UUID, text string, req *VectorSearchRequest) (*SearchResponse, error) {
+	if s.embeddings == nil {
+		return &SearchResponse{Data: []*SearchResultItem{}, Total: 0, Offset: req.Offset}, nil
+	}
+	vec, err := s.embeddings.EmbedQuery(ctx, text)
+	if err != nil {
+		return nil, fmt.Errorf("embed query text: %w", err)
+	}
+	if len(vec) == 0 {
+		return &SearchResponse{Data: []*SearchResultItem{}, Total: 0, Offset: req.Offset}, nil
+	}
+	req.Vector = vec
+	return s.VectorSearch(ctx, projectID, req)
+}
+
 // HybridSearchOptions contains options for hybrid search.
 type HybridSearchOptions struct {
 	Debug bool // Include timing and statistics in response
