@@ -5136,10 +5136,10 @@ func (s *Service) executeRemember(ctx context.Context, projectID string, args ma
 	// (NOT SSE — only "stream" mode streams). Decode it directly so the run_id
 	// and summary are preserved for remember-status(run_id).
 	var syncResp struct {
-		RunID      string `json:"run_id"`
-		Status     string `json:"status"`
-		Summary    string `json:"summary"`
-		DocumentID string `json:"document_id"`
+		RunID      string         `json:"run_id"`
+		Status     string         `json:"status"`
+		Summary    map[string]any `json:"summary"`
+		DocumentID string         `json:"document_id"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&syncResp); err != nil {
 		return nil, fmt.Errorf("remember: failed to decode sync response: %w", err)
@@ -5154,8 +5154,10 @@ func (s *Service) executeRemember(ctx context.Context, projectID string, args ma
 	if syncResp.Status != "" {
 		parts = append(parts, "status: "+syncResp.Status)
 	}
-	if syncResp.Summary != "" {
-		parts = append(parts, "Summary: "+syncResp.Summary)
+	if syncResp.Summary != nil {
+		if b, err := json.Marshal(syncResp.Summary); err == nil {
+			parts = append(parts, "summary: "+string(b))
+		}
 	}
 	parts = append(parts, "call remember-status(run_id) to see what was created")
 	return &ToolResult{Content: []ContentBlock{{Type: "text", Text: strings.Join(parts, "\n")}}}, nil
@@ -5231,9 +5233,9 @@ func (s *Service) executeForget(ctx context.Context, projectID string, args map[
 	// only "stream" mode streams). Decode it directly so the run_id and
 	// summary are preserved for remember-status(run_id).
 	var syncResp struct {
-		RunID   string `json:"run_id"`
-		Status  string `json:"status"`
-		Summary string `json:"summary"`
+		RunID   string         `json:"run_id"`
+		Status  string         `json:"status"`
+		Summary map[string]any `json:"summary"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&syncResp); err != nil {
 		return nil, fmt.Errorf("forget: failed to decode sync response: %w", err)
@@ -5248,8 +5250,10 @@ func (s *Service) executeForget(ctx context.Context, projectID string, args map[
 	if syncResp.Status != "" {
 		parts = append(parts, "status: "+syncResp.Status)
 	}
-	if syncResp.Summary != "" {
-		parts = append(parts, "Summary: "+syncResp.Summary)
+	if syncResp.Summary != nil {
+		if b, err := json.Marshal(syncResp.Summary); err == nil {
+			parts = append(parts, "summary: "+string(b))
+		}
 	}
 	parts = append(parts, "call remember-status(run_id) to see what was removed")
 	return &ToolResult{Content: []ContentBlock{{Type: "text", Text: strings.Join(parts, "\n")}}}, nil
