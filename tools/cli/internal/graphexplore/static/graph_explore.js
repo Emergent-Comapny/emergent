@@ -115,6 +115,7 @@ const $stats       = document.getElementById('stats');
 const $toast       = document.getElementById('toast');
 const $panel       = document.getElementById('right-panel');
 const $searchInput = document.getElementById('search-input');
+const $branchInput = document.getElementById('current-branch-id');
 
 // ── Toast ─────────────────────────────────────────────────────────────────
 let toastTimer;
@@ -659,9 +660,9 @@ function drawNodeLabel(context, data, settings) {
 }
 
 function drawNodeHoverLabel(context, data, settings) {
-  // Only draw the icon inside the node circle.
-  // The rich hover card is an HTML overlay, positioned by enterNode/leaveNode events.
-  drawNodeIcon(context, data);
+  // Draw the same icon + chip as the normal label so hovering a node does not
+  // hide its label. The rich hover card is still shown as an HTML overlay.
+  drawNodeLabel(context, data, settings);
 }
 
 // ── Hover card ────────────────────────────────────────────────────────────
@@ -672,7 +673,6 @@ const $nhcName    = document.getElementById('nhc-name');
 const $nhcProps   = document.getElementById('nhc-props');
 const $nhcEdges   = document.getElementById('nhc-edges');
 let hoverHideTimer = null;
-let _sigmaNodeHovered = false; // true while sigma's enterNode is active (cursor on dot)
 
 // Top-5 property keys to skip (already shown in header or rarely useful)
 const HC_SKIP_KEYS = new Set(['name', 'title', 'id', 'canonical_id', 'entity_id', 'type']);
@@ -710,35 +710,51 @@ function chipBounds(node) {
   return { x: chipX, y: chipY, w: chipW, h: CHIP_H, vp, size };
 }
 
-// Called on every mousemove over the sigma canvas when no dot is hovered.
+// Called on every mousemove over the sigma canvas. Detects the cursor over a
+// node circle OR its label chip and shows the hover card accordingly.
 function handleChipMouseMove(clientX, clientY) {
-  if (_sigmaNodeHovered) return; // dot hover takes precedence
   const container = document.getElementById('sigma-container');
   if (!container) return;
   const rect = container.getBoundingClientRect();
   const cx = clientX - rect.left; // coords relative to container
   const cy = clientY - rect.top;
 
+  const showFor = (node, vp) => {
+    const d = nodeData[node] || {};
+    const attrs = graph.getNodeAttributes(node);
+    showHoverCard(
+      node,
+      rect.left + vp.x,
+      rect.top + vp.y,
+      attrs.color || '#8b949e',
+      d.type || attrs.nodeType || '',
+      attrs.label || '',
+      d.properties || null
+    );
+  };
+
   for (const node of graph.nodes()) {
+    const attrs = graph.getNodeAttributes(node);
+    if (attrs.hidden) continue;
+
+    // Node circle hit-test (works regardless of whether a chip is drawn).
+    const vp = sigmaInstance.graphToViewport({ x: attrs.x, y: attrs.y });
+    const size = sigmaInstance.getNodeDisplayData(node)?.size ?? attrs.size ?? 14;
+    const dx = cx - vp.x;
+    const dy = cy - vp.y;
+    if (dx * dx + dy * dy <= (size + 2) * (size + 2)) {
+      showFor(node, vp);
+      return;
+    }
+
+    // Label chip hit-test (drawn to the right of the circle).
     const b = chipBounds(node);
-    if (!b) continue;
-    if (cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h) {
-      // Cursor is inside this node's chip
-      const d = nodeData[node] || {};
-      const attrs = graph.getNodeAttributes(node);
-      showHoverCard(
-        node,
-        rect.left + b.vp.x,
-        rect.top  + b.vp.y,
-        attrs.color || '#8b949e',
-        d.type || attrs.nodeType || '',
-        attrs.label || '',
-        d.properties || null
-      );
+    if (b && cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h) {
+      showFor(node, b.vp);
       return;
     }
   }
-  // Not over any chip — hide after short delay
+  // Not over any circle or chip — hide after short delay
   hideHoverCard(60);
 }
 
@@ -979,39 +995,16 @@ function initSigma() {
   sigmaInstance.on('clickStage', () => deselectNode());
 
   // Hover card on canvas nodes
-  sigmaInstance.on('enterNode', ({ node }) => {
-    if (dragState) return; // don't show while dragging
-    _sigmaNodeHovered = true;
-    const d = nodeData[node] || {};
-    const attrs = graph.getNodeAttributes(node);
-    const vp = sigmaInstance.graphToViewport({ x: attrs.x, y: attrs.y });
-    const container = document.getElementById('sigma-container');
-    const rect = container.getBoundingClientRect();
-    showHoverCard(
-      node,
-      rect.left + vp.x,
-      rect.top + vp.y,
-      attrs.color || '#8b949e',
-      d.type || attrs.nodeType || '',
-      attrs.label || '',
-      d.properties || null
-    );
-  });
-  sigmaInstance.on('leaveNode', () => {
-    _sigmaNodeHovered = false;
-    hideHoverCard(80);
-  });
-
-  // Also show hover card when cursor moves over the chip (drawn outside the node dot).
-  // We listen on sigma-container itself (always exists) rather than the canvas element
-  // to avoid any canvas creation timing issues.
+  // Hover card on canvas nodes: unified detection over both the node circle and
+  // its label chip, driven by mousemove on the sigma container. We listen on
+  // sigma-container itself (always exists) rather than the canvas element to
+  // avoid any canvas creation timing issues.
   const sigmaContainer = document.getElementById('sigma-container');
   sigmaContainer.addEventListener('mousemove', (e) => {
     if (dragState) return;
     handleChipMouseMove(e.clientX, e.clientY);
   });
   sigmaContainer.addEventListener('mouseleave', () => {
-    _sigmaNodeHovered = false;
     hideHoverCard(80);
   });
 
@@ -1560,6 +1553,7 @@ if (currentBranchID) {
 } else {
   $branchLabel.textContent = 'main';
 }
+if ($branchInput) $branchInput.value = currentBranchID || '';
 
 async function loadBranches() {
   if (branchesLoaded) return;
@@ -1627,6 +1621,7 @@ function switchBranch(branchID, label) {
 
   currentBranchID = branchID;
   $branchLabel.textContent = label;
+  if ($branchInput) $branchInput.value = branchID || '';
   $branchDropdown.classList.add('hidden');
   branchesLoaded = false; // force reload next time
 

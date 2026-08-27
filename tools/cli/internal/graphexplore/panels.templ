@@ -5,6 +5,8 @@ import "fmt"
 // LeftPanel renders the full left sidebar with node + edge filter lists.
 templ LeftPanel(nodeTypes []ObjectType, edgeTypes []RelationshipType) {
 	<div id="left-panel" class="bg-gh-surface border-r border-gh-border flex flex-col overflow-hidden">
+		<!-- current branch — carried to /htmx/node-types + /htmx/edge-types on refresh -->
+		<input type="hidden" id="current-branch-id" name="branch_id" value=""/>
 		<!-- Node types — top half -->
 		<div id="panel-nodes" class="flex flex-col flex-1 min-h-0 overflow-hidden border-b border-gh-border">
 			<div class="flex items-center justify-between px-3 pt-2.5 pb-2 shrink-0 border-b border-gh-border">
@@ -23,7 +25,7 @@ templ LeftPanel(nodeTypes []ObjectType, edgeTypes []RelationshipType) {
 			hx-get="/htmx/node-types"
 			hx-trigger="load, refreshFilters from:body"
 			hx-swap="innerHTML"
-			hx-include="#hidden-node-types"
+			hx-include="#hidden-node-types, #current-branch-id"
 			hx-sync="#node-filter-list:replace"
 		>
 				<div class="px-3 py-3 text-[11px] text-gh-muted">Loading types…</div>
@@ -45,7 +47,7 @@ templ LeftPanel(nodeTypes []ObjectType, edgeTypes []RelationshipType) {
 			hx-get="/htmx/edge-types"
 			hx-trigger="load, refreshFilters from:body"
 			hx-swap="innerHTML"
-			hx-include="#hidden-edge-types, #selected-type-filter"
+			hx-include="#hidden-edge-types, #selected-type-filter, #current-branch-id"
 			hx-sync="#edge-filter-list:replace"
 		>
 			</div>

@@ -33,6 +33,7 @@ type Server struct {
 	relLabelMap       map[string]relLabelEntry
 	paletteIdx        int
 	schemaLoaded      bool
+	countsByBranch    map[string]map[string]int // branchID ("" = main) -> type name -> count
 	rawSchemaByType   map[string]json.RawMessage
 	compiledRelTypes  []compiledRelType
 }
@@ -52,6 +53,7 @@ func NewServer(projectID, serverURL, authHeader, branchID string) *Server {
 		httpClient:      &http.Client{},
 		typeColorMap:    make(map[string]string),
 		relLabelMap:     make(map[string]relLabelEntry),
+		countsByBranch:  make(map[string]map[string]int),
 		rawSchemaByType: make(map[string]json.RawMessage),
 	}
 }
@@ -67,10 +69,15 @@ func (s *Server) typeColor(typeName string) string {
 	return c
 }
 
-// proxyGet makes a GET request to the Memory API server.
-// It automatically appends branch_id if the server is configured with one.
+// proxyGet makes a GET request to the Memory API server using the server's
+// configured branch.
 func (s *Server) proxyGet(path string) ([]byte, int, error) {
-	url := s.ServerURL + s.appendBranchParam(path)
+	return s.proxyGetBranch(path, s.BranchID)
+}
+
+// proxyGetBranch is like proxyGet but uses an explicit branch_id ("" = main).
+func (s *Server) proxyGetBranch(path, branchID string) ([]byte, int, error) {
+	url := s.ServerURL + appendBranchParamFor(path, branchID)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, 0, err
@@ -240,23 +247,32 @@ func (s *Server) loadSchema() error {
 	}
 	s.compiledRelTypes = compiled.RelationshipTypes
 
-	// 5. Fetch per-type counts in parallel (sequentially here for simplicity)
-	for i, ot := range s.objectTypes {
-		body, status, err := s.proxyGet(fmt.Sprintf("/api/graph/objects/count?type=%s", ot.Name))
+	// Only cache if we got at least some types — if empty, allow retry on next request
+	if len(s.objectTypes) > 0 || len(s.relationshipTypes) > 0 {
+		s.schemaLoaded = true
+	}
+	return nil
+}
+
+// loadCounts fetches per-type object counts for the given branch ("" = main)
+// and caches them. The type list is branch-independent and loaded once.
+func (s *Server) loadCounts(branchID string) error {
+	if _, ok := s.countsByBranch[branchID]; ok {
+		return nil
+	}
+	counts := make(map[string]int)
+	for _, ot := range s.objectTypes {
+		body, status, err := s.proxyGetBranch(fmt.Sprintf("/api/graph/objects/count?type=%s", ot.Name), branchID)
 		if err == nil && status == 200 {
 			var countResp struct {
 				Count int `json:"count"`
 			}
 			if json.Unmarshal(body, &countResp) == nil {
-				s.objectTypes[i].Count = countResp.Count
+				counts[ot.Name] = countResp.Count
 			}
 		}
 	}
-
-	// Only cache if we got at least some types — if empty, allow retry on next request
-	if len(s.objectTypes) > 0 || len(s.relationshipTypes) > 0 {
-		s.schemaLoaded = true
-	}
+	s.countsByBranch[branchID] = counts
 	return nil
 }
 
@@ -307,14 +323,19 @@ func (s *Server) handleNodeTypes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	branchID := r.FormValue("branch_id")
+	_ = s.loadCounts(branchID) // best-effort; counts default to 0 on failure
+
 	// Parse hidden types from the HTMX request (sent via hx-include)
 	hiddenSet := parseCommaSeparated(r.FormValue("hiddenNodeTypes"))
 
 	// Sort by count descending
 	types := make([]ObjectType, len(s.objectTypes))
 	copy(types, s.objectTypes)
+	counts := s.countsByBranch[branchID]
 	for i := range types {
 		types[i].Hidden = hiddenSet[types[i].Name]
+		types[i].Count = counts[types[i].Name]
 	}
 	sort.Slice(types, func(i, j int) bool {
 		return types[i].Count > types[j].Count
@@ -815,11 +836,15 @@ func parseCommaSeparated(s string) map[string]bool {
 // appendBranchParam adds ?branch_id=<id> or &branch_id=<id> to a URL path
 // if the server is configured with a branch. Returns path unchanged if no branch.
 func (s *Server) appendBranchParam(path string) string {
-	if s.BranchID == "" {
+	return appendBranchParamFor(path, s.BranchID)
+}
+
+func appendBranchParamFor(path, branchID string) string {
+	if branchID == "" {
 		return path
 	}
 	if strings.Contains(path, "?") {
-		return path + "&branch_id=" + s.BranchID
+		return path + "&branch_id=" + branchID
 	}
-	return path + "?branch_id=" + s.BranchID
+	return path + "?branch_id=" + branchID
 }
