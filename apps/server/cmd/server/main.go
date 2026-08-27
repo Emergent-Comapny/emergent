@@ -30,6 +30,7 @@ import (
 	"github.com/emergent-company/emergent.memory/domain/authinfo"
 	"github.com/emergent-company/emergent.memory/domain/autoprovision"
 	"github.com/emergent-company/emergent.memory/domain/backups"
+	"github.com/emergent-company/emergent.memory/domain/blueprints"
 	"github.com/emergent-company/emergent.memory/domain/branches"
 	"github.com/emergent-company/emergent.memory/domain/chat"
 	"github.com/emergent-company/emergent.memory/domain/chunking"
@@ -158,6 +159,7 @@ func coreFxOptions() fx.Option {
 		sessiontodos.Module,
 		skills.Module,
 		schemas.Module,
+		blueprints.Module,
 		schemaregistry.Module,
 		useraccess.Module,
 		useractivity.Module,
@@ -214,6 +216,10 @@ func featureFxOptions(f config.FeatureSet) []fx.Option {
 		opts = append(opts, fx.Invoke(func(handler *agents.MCPToolHandler, extractionFinder mcp.ExtractionJobFinder, embeddingFinder mcp.EmbeddingJobFinder) {
 			handler.SetExtractionJobFinder(extractionFinder)
 			handler.SetEmbeddingJobFinder(embeddingFinder)
+		}))
+		// Wire agent definitions into blueprint apply (agents feature only).
+		opts = append(opts, fx.Invoke(func(svc *blueprints.Service, agentRepo *agents.Repository) {
+			svc.SetAgentRepo(agentRepo)
 		}))
 	}
 	if f.MCP {
