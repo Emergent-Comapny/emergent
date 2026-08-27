@@ -1,0 +1,333 @@
+package blueprints
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/url"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/joho/godotenv"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/driver/pgdriver"
+
+	"github.com/emergent-company/emergent.memory/pkg/apperror"
+)
+
+// ---------------------------------------------------------------------------
+// Shared test helpers (same pattern as domain/skills/store_test.go)
+// ---------------------------------------------------------------------------
+
+// loadEnvFiles loads .env / .env.local from the repo root (walking up from CWD),
+// mirroring internal/testutil so tests can reach the local Postgres instance.
+func loadEnvFiles() {
+	if wd, err := os.Getwd(); err == nil {
+		for dir := wd; dir != "/"; dir = filepath.Dir(dir) {
+			envLocal := filepath.Join(dir, ".env.local")
+			if _, statErr := os.Stat(envLocal); statErr == nil {
+				_ = godotenv.Load(filepath.Join(dir, ".env"))
+				_ = godotenv.Overload(envLocal)
+				break
+			}
+		}
+	}
+}
+
+// connectTestDB connects to Postgres for integration tests. Honors TEST_DATABASE_URL,
+// falling back to POSTGRES_* env vars. Skips when unavailable or in short mode.
+func connectTestDB(t *testing.T) *bun.DB {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("Skipping database integration test in short mode")
+	}
+	loadEnvFiles()
+
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		host := os.Getenv("POSTGRES_HOST")
+		if host == "" {
+			host = "localhost"
+		}
+		port := os.Getenv("POSTGRES_PORT")
+		if port == "" {
+			port = "5432"
+		}
+		user := os.Getenv("POSTGRES_USER")
+		if user == "" {
+			user = "emergent"
+		}
+		pass := os.Getenv("POSTGRES_PASSWORD")
+		if pass == "" {
+			pass = "emergent"
+		}
+		name := os.Getenv("POSTGRES_DB")
+		if name == "" {
+			name = "emergent"
+		}
+		dsn = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
+			url.QueryEscape(user), url.QueryEscape(pass), host, port, name)
+	}
+
+	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := sqldb.PingContext(ctx); err != nil {
+		_ = sqldb.Close()
+		t.Skipf("database unavailable (%v), skipping integration test", err)
+	}
+	db := bun.NewDB(sqldb, pgdialect.New())
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+// testLogger returns a discard logger for tests.
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// uniqueName returns a unique name for a test row (avoids collisions in the
+// shared dev database across runs).
+func uniqueName(prefix string) string {
+	return prefix + "-" + uuid.NewString()[:8]
+}
+
+// testBlueprint builds a blueprint with defaults suitable for repository tests.
+func testBlueprint(name, version string) *Blueprint {
+	return &Blueprint{
+		Name:        name,
+		Version:     version,
+		Description: "description for " + name,
+		Author:      "test-author",
+		Status:      StatusDraft,
+		Manifest:    json.RawMessage(fmt.Sprintf(`{"kind":"test","version":%q}`, version)),
+		Checksum:    "",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+}
+
+// seedProject creates a real org + project row (kb.agent_definitions and other
+// tables reference kb.projects) and returns their IDs.
+func seedProject(t *testing.T, db bun.IDB) (orgID, projectID string) {
+	t.Helper()
+	ctx := context.Background()
+	orgID = uuid.NewString()
+	projectID = uuid.NewString()
+	_, err := db.ExecContext(ctx, `INSERT INTO kb.orgs (id, name) VALUES (?, ?)`, orgID, "test-org-"+orgID)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `INSERT INTO kb.projects (id, organization_id, name) VALUES (?, ?, ?)`,
+		projectID, orgID, "test-project-"+projectID)
+	require.NoError(t, err)
+	return orgID, projectID
+}
+
+// assertAppErrorCode asserts err is an *apperror.Error with the given code.
+func assertAppErrorCode(t *testing.T, err error, code string) {
+	t.Helper()
+	require.Error(t, err)
+	var appErr *apperror.Error
+	require.True(t, errors.As(err, &appErr), "expected *apperror.Error, got %T: %v", err, err)
+	assert.Equal(t, code, appErr.Code)
+}
+
+// ---------------------------------------------------------------------------
+// Repository tests (data layer against real Postgres)
+// ---------------------------------------------------------------------------
+
+// TestRepository_CreateGetByID_RoundTrip verifies Create populates the ID and
+// GetByID returns the full row (manifest survives the jsonb round-trip).
+func TestRepository_CreateGetByID_RoundTrip(t *testing.T) {
+	db := connectTestDB(t)
+	repo := NewRepository(db, testLogger())
+	ctx := context.Background()
+
+	name := uniqueName("roundtrip")
+	bp := testBlueprint(name, "1.0.0")
+	require.NoError(t, repo.Create(ctx, bp))
+	assert.NotEmpty(t, bp.ID, "Create must populate the DB-generated ID")
+
+	got, err := repo.GetByID(ctx, bp.ID)
+	require.NoError(t, err)
+	assert.Equal(t, bp.ID, got.ID)
+	assert.Equal(t, name, got.Name)
+	assert.Equal(t, "1.0.0", got.Version)
+	assert.Equal(t, StatusDraft, got.Status)
+	assert.Equal(t, "test-author", got.Author)
+	assert.JSONEq(t, string(bp.Manifest), string(got.Manifest), "manifest must survive the jsonb round-trip")
+	assert.False(t, got.CreatedAt.IsZero())
+}
+
+// TestRepository_Create_DuplicateNameVersion_Conflict proves the ON CONFLICT
+// (name, version) enforcement in Create — the database, not just the service
+// pre-check, rejects duplicates.
+func TestRepository_Create_DuplicateNameVersion_Conflict(t *testing.T) {
+	db := connectTestDB(t)
+	repo := NewRepository(db, testLogger())
+	ctx := context.Background()
+
+	name := uniqueName("dup")
+	bp1 := testBlueprint(name, "1.0.0")
+	require.NoError(t, repo.Create(ctx, bp1))
+
+	bp2 := testBlueprint(name, "1.0.0")
+	err := repo.Create(ctx, bp2)
+	assertAppErrorCode(t, err, apperror.ErrConflict.Code)
+}
+
+// TestRepository_List_FilterAndOrder verifies List with and without a name
+// filter, ordered by name then version.
+func TestRepository_List_FilterAndOrder(t *testing.T) {
+	db := connectTestDB(t)
+	repo := NewRepository(db, testLogger())
+	ctx := context.Background()
+
+	name := uniqueName("list")
+	for _, v := range []string{"1.0.0", "2.0.0"} {
+		require.NoError(t, repo.Create(ctx, testBlueprint(name, v)))
+	}
+	require.NoError(t, repo.Create(ctx, testBlueprint(uniqueName("other"), "1.0.0")))
+
+	t.Run("filtered", func(t *testing.T) {
+		got, err := repo.List(ctx, name)
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+		assert.Equal(t, name, got[0].Name)
+		assert.Equal(t, "1.0.0", got[0].Version)
+		assert.Equal(t, "2.0.0", got[1].Version, "versions must be ordered ascending")
+	})
+
+	t.Run("unfiltered includes all with relative order", func(t *testing.T) {
+		got, err := repo.List(ctx, "")
+		require.NoError(t, err)
+		require.NotEmpty(t, got)
+
+		var idx1, idx2 = -1, -1
+		for i, b := range got {
+			switch {
+			case b.Name == name && b.Version == "1.0.0":
+				idx1 = i
+			case b.Name == name && b.Version == "2.0.0":
+				idx2 = i
+			}
+		}
+		assert.GreaterOrEqual(t, idx1, 0, "v1.0.0 row must be present")
+		assert.GreaterOrEqual(t, idx2, 0, "v2.0.0 row must be present")
+		assert.Less(t, idx1, idx2, "same name must be ordered by version ascending")
+	})
+}
+
+// TestRepository_ListVersionsByName verifies all versions of a name come back
+// ordered by version.
+func TestRepository_ListVersionsByName(t *testing.T) {
+	db := connectTestDB(t)
+	repo := NewRepository(db, testLogger())
+	ctx := context.Background()
+
+	name := uniqueName("versions")
+	require.NoError(t, repo.Create(ctx, testBlueprint(name, "2.0.0")))
+	require.NoError(t, repo.Create(ctx, testBlueprint(name, "1.0.0")))
+	require.NoError(t, repo.Create(ctx, testBlueprint(uniqueName("vother"), "1.0.0")))
+
+	got, err := repo.ListVersionsByName(ctx, name)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, "1.0.0", got[0].Version)
+	assert.Equal(t, "2.0.0", got[1].Version)
+}
+
+// TestRepository_Update_InPlace verifies Update persists description, author,
+// and manifest changes and bumps updated_at.
+func TestRepository_Update_InPlace(t *testing.T) {
+	db := connectTestDB(t)
+	repo := NewRepository(db, testLogger())
+	ctx := context.Background()
+
+	bp := testBlueprint(uniqueName("update"), "1.0.0")
+	require.NoError(t, repo.Create(ctx, bp))
+
+	before, err := repo.GetByID(ctx, bp.ID)
+	require.NoError(t, err)
+
+	time.Sleep(2 * time.Millisecond)
+	bp.Description = "updated description"
+	bp.Author = "updated-author"
+	bp.Manifest = json.RawMessage(`{"kind":"updated"}`)
+	require.NoError(t, repo.Update(ctx, bp))
+
+	got, err := repo.GetByID(ctx, bp.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "updated description", got.Description)
+	assert.Equal(t, "updated-author", got.Author)
+	assert.JSONEq(t, `{"kind":"updated"}`, string(got.Manifest))
+	assert.True(t, got.UpdatedAt.After(before.UpdatedAt), "updated_at must be bumped")
+}
+
+// TestRepository_UpdateStatus verifies UpdateStatus transitions status and
+// sets the checksum.
+func TestRepository_UpdateStatus(t *testing.T) {
+	db := connectTestDB(t)
+	repo := NewRepository(db, testLogger())
+	ctx := context.Background()
+
+	bp := testBlueprint(uniqueName("status"), "1.0.0")
+	require.NoError(t, repo.Create(ctx, bp))
+
+	require.NoError(t, repo.UpdateStatus(ctx, bp.ID, StatusPublished, "abc123"))
+	got, err := repo.GetByID(ctx, bp.ID)
+	require.NoError(t, err)
+	assert.Equal(t, StatusPublished, got.Status)
+	assert.Equal(t, "abc123", got.Checksum)
+}
+
+// TestRepository_ExistsByNameVersion verifies the fast-path existence check.
+func TestRepository_ExistsByNameVersion(t *testing.T) {
+	db := connectTestDB(t)
+	repo := NewRepository(db, testLogger())
+	ctx := context.Background()
+
+	name := uniqueName("exists")
+	exists, err := repo.ExistsByNameVersion(ctx, name, "1.0.0")
+	require.NoError(t, err)
+	assert.False(t, exists)
+
+	require.NoError(t, repo.Create(ctx, testBlueprint(name, "1.0.0")))
+
+	exists, err = repo.ExistsByNameVersion(ctx, name, "1.0.0")
+	require.NoError(t, err)
+	assert.True(t, exists)
+
+	// Different version of the same name must not match.
+	exists, err = repo.ExistsByNameVersion(ctx, name, "9.9.9")
+	require.NoError(t, err)
+	assert.False(t, exists)
+}
+
+// TestRepository_Delete_ThenGetByID_NotFound verifies Delete removes the row
+// and subsequent lookups (and double deletes) return ErrNotFound.
+func TestRepository_Delete_ThenGetByID_NotFound(t *testing.T) {
+	db := connectTestDB(t)
+	repo := NewRepository(db, testLogger())
+	ctx := context.Background()
+
+	bp := testBlueprint(uniqueName("delete"), "1.0.0")
+	require.NoError(t, repo.Create(ctx, bp))
+
+	require.NoError(t, repo.Delete(ctx, bp.ID))
+
+	_, err := repo.GetByID(ctx, bp.ID)
+	assertAppErrorCode(t, err, apperror.ErrNotFound.Code)
+
+	err = repo.Delete(ctx, bp.ID)
+	assertAppErrorCode(t, err, apperror.ErrNotFound.Code)
+}
