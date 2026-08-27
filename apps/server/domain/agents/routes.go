@@ -62,6 +62,20 @@ func RegisterRoutes(e *echo.Echo, h *Handler, authMiddleware *auth.Middleware) {
 	defsWrite.PUT("/overrides/:agentName", h.SetAgentOverride)
 	defsWrite.DELETE("/overrides/:agentName", h.DeleteAgentOverride)
 
+	// --- Generic project settings (key/value config) ---
+	settings := e.Group("/api/projects/:projectId/settings")
+	settings.Use(authMiddleware.RequireAuth())
+	settings.Use(authMiddleware.RequireProjectScope())
+
+	settingsRead := settings.Group("")
+	settingsRead.Use(authMiddleware.RequireAPITokenScopes("agents:read"))
+	settingsRead.GET("/:category/:key", h.GetProjectSetting)
+
+	settingsWrite := settings.Group("")
+	settingsWrite.Use(authMiddleware.RequireAPITokenScopes("agents:write"))
+	settingsWrite.PUT("/:category/:key", h.SetProjectSetting)
+	settingsWrite.DELETE("/:category/:key", h.DeleteProjectSetting)
+
 	// --- Project-scoped run history routes ---
 	runs := e.Group("/api/projects/:projectId/agent-runs")
 	runs.Use(authMiddleware.RequireAuth())
