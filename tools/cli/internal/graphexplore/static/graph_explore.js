@@ -841,7 +841,7 @@ function populateHoverCard(nodeId, color, typeName, label, inGraphProps) {
       keyEl.style.cssText = 'color:#8b949e;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
       keyEl.textContent = k;
       const valEl = document.createElement('span');
-      valEl.style.cssText = 'color:#e6edf3;font-size:11px;font-family:monospace;word-break:break-all;min-width:0';
+      valEl.style.cssText = 'color:#e6edf3;font-size:11px;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0';
       valEl.textContent = val.slice(0, 80);
       $nhcProps.append(keyEl, valEl);
     }
@@ -861,7 +861,7 @@ function showHoverCard(nodeId, screenX, screenY, color, typeName, label, inGraph
 
   // Position: prefer right of cursor, flip left if near right edge
   const margin = 12;
-  const cardW = 220;
+  const cardW = 360;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
 
