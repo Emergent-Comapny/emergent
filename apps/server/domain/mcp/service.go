@@ -3,6 +3,8 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -3480,6 +3482,37 @@ func (s *Service) executeGraphBranchDelete(ctx context.Context, projectID string
 	})
 }
 
+// generateEntityKey derives a deterministic, human-readable key for an entity when the
+// caller does not supply one. The key is a slugified type name followed by a short content
+// hash, so re-creating the same entity content (e.g. re-remembering the same fact) upserts
+// the same object instead of duplicating it.
+func generateEntityKey(typeName string, props map[string]any) string {
+	typeSlug := strings.ToLower(typeName)
+	typeSlug = slugRegexp.ReplaceAllString(typeSlug, "-")
+	typeSlug = strings.Trim(typeSlug, "-")
+	if typeSlug == "" {
+		typeSlug = "entity"
+	}
+
+	// Canonicalize properties with sorted keys for deterministic hashing.
+	keys := make([]string, 0, len(props))
+	for k := range props {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	h := sha256.New()
+	h.Write([]byte(typeName))
+	for _, k := range keys {
+		h.Write([]byte(k))
+		h.Write([]byte{'='})
+		b, _ := json.Marshal(props[k])
+		h.Write(b)
+	}
+
+	return typeSlug + "-" + hex.EncodeToString(h.Sum(nil))[:12]
+}
+
 // executeBatchCreateEntities creates one or more entities. Always expects an "entities" array.
 // Backward-compat: if flat fields (type, properties, etc.) are passed instead, wraps them as a single-element array.
 //
@@ -3597,6 +3630,15 @@ func (s *Service) executeBatchCreateEntities(ctx context.Context, projectID stri
 		properties, _ := entityMap["properties"].(map[string]any)
 		if properties == nil {
 			properties = make(map[string]any)
+		}
+
+		// Autogenerate a deterministic key when the caller omits one. This keeps
+		// upsert semantics idempotent: re-creating the same entity content (e.g.
+		// re-remembering the same fact) updates the same object instead of
+		// failing with "key is required for upsert" or duplicating the entity.
+		if key == nil {
+			k := generateEntityKey(typeName, properties)
+			key = &k
 		}
 
 		// status flows through properties JSONB; the graph layer syncs the
