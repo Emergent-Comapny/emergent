@@ -2361,6 +2361,9 @@ type BranchObjectHead struct {
 	Labels      []string
 	Properties  map[string]any
 	DeletedAt   *time.Time
+	// MergedToCanonicalID is non-nil when this source object was already cloned
+	// to a target branch by a prior merge (the merge ledger).
+	MergedToCanonicalID *uuid.UUID
 }
 
 // GetBranchObjectHeads returns HEAD versions of all objects on a branch.
@@ -2370,7 +2373,7 @@ func (r *Repository) GetBranchObjectHeads(ctx context.Context, projectID uuid.UU
 
 	q := r.db.NewSelect().
 		Model(&objects).
-		Column("id", "canonical_id", "content_hash", "type", "key", "status", "namespace", "labels", "properties", "deleted_at").
+		Column("id", "canonical_id", "content_hash", "type", "key", "status", "namespace", "labels", "properties", "deleted_at", "merged_to_canonical_id").
 		Where("project_id = ?", projectID).
 		Where("supersedes_id IS NULL")
 
@@ -2388,16 +2391,17 @@ func (r *Repository) GetBranchObjectHeads(ctx context.Context, projectID uuid.UU
 	result := make(map[uuid.UUID]*BranchObjectHead)
 	for _, obj := range objects {
 		result[obj.CanonicalID] = &BranchObjectHead{
-			CanonicalID: obj.CanonicalID,
-			ID:          obj.ID,
-			ContentHash: obj.ContentHash,
-			Type:        obj.Type,
-			Key:         obj.Key,
-			Status:      obj.Status,
-			Namespace:   obj.Namespace,
-			Labels:      obj.Labels,
-			Properties:  obj.Properties,
-			DeletedAt:   obj.DeletedAt,
+			CanonicalID:         obj.CanonicalID,
+			ID:                  obj.ID,
+			ContentHash:         obj.ContentHash,
+			Type:                obj.Type,
+			Key:                 obj.Key,
+			Status:              obj.Status,
+			Namespace:           obj.Namespace,
+			Labels:              obj.Labels,
+			Properties:          obj.Properties,
+			DeletedAt:           obj.DeletedAt,
+			MergedToCanonicalID: obj.MergedToCanonicalID,
 		}
 	}
 

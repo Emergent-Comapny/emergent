@@ -1400,6 +1400,7 @@ CREATE TABLE kb.graph_objects (
     last_accessed_at timestamp with time zone,
     namespace text,
     delete_reason text,
+    merged_to_canonical_id uuid,
     CONSTRAINT chk_graph_objects_actor_type CHECK ((actor_type = ANY (ARRAY['user'::text, 'agent'::text, 'system'::text])))
 );
 
@@ -2176,7 +2177,8 @@ CREATE TABLE kb.projects (
     deleted_by uuid,
     project_info text,
     budget_usd numeric(10,4) DEFAULT 10.0,
-    budget_alert_threshold numeric(3,2) DEFAULT 0.80 NOT NULL
+    budget_alert_threshold numeric(3,2) DEFAULT 0.80 NOT NULL,
+    auto_merge_extraction_branches boolean DEFAULT false NOT NULL
 );
 
 

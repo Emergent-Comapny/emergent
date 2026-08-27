@@ -2326,11 +2326,14 @@ Delete a branch and all objects that exist only on that branch.
 Objects that have already been merged into another branch are unaffected.
 This operation is irreversible.
 
+When the branch ID is omitted and the terminal is interactive, a picker
+lists the branches in the current project.
+
 Examples:
   memory graph branches delete <branch-id>
 
 ```
-memory graph branches delete <id> [flags]
+memory graph branches delete [id] [flags]
 ```
 
 ### Options
@@ -2349,7 +2352,9 @@ Fork a branch — create a new branch and copy all HEAD objects and
 relationships from the source into it.
 
 SOURCE: use a branch UUID from "memory graph branches list", or the special
-keyword "main" to fork from the main graph (branch_id IS NULL).
+keyword "main" to fork from the main graph (branch_id IS NULL). When the
+source is omitted and the terminal is interactive, a picker lists the
+branches in the current project.
 
 Copied objects preserve their canonical IDs so a subsequent merge back
 into the source is aware of shared identity. Only HEAD versions are
@@ -2365,7 +2370,7 @@ Examples:
   memory graph branches fork <source-branch-id> --name "child" --description "child branch"
 
 ```
-memory graph branches fork <source-branch-id|main> [flags]
+memory graph branches fork [source-branch-id|main] [flags]
 ```
 
 ### Options
@@ -2387,12 +2392,15 @@ Get details for a branch by its ID.
 
 Use --output json to receive the full object as JSON.
 
+When the branch ID is omitted and the terminal is interactive, a picker
+lists the branches in the current project.
+
 Examples:
   memory graph branches get <branch-id>
   memory graph branches get <branch-id> --output json
 
 ```
-memory graph branches get <id> [flags]
+memory graph branches get [id] [flags]
 ```
 
 ### Options
@@ -2443,7 +2451,9 @@ DIRECTION: source → target. The source branch is read; the target branch
 receives the changes.
 
 TARGET: use a branch UUID from "memory graph branches list", or the special
-keyword "main" to merge into the main graph (branch_id IS NULL).
+keyword "main" to merge into the main graph (branch_id IS NULL). When the
+target is omitted and the terminal is interactive, a picker lists the
+branches in the current project.
 
 By default this is a DRY RUN — no changes are made. Pass --execute only
 when you are ready to apply.
@@ -2476,7 +2486,7 @@ Examples:
   memory graph branches merge <target-id> --source <source-id> --output json
 
 ```
-memory graph branches merge <target-branch-id|main> [flags]
+memory graph branches merge [target-branch-id|main] [flags]
 ```
 
 ### Options
@@ -2498,13 +2508,16 @@ Update a branch's name or description.
 Use --name to rename the branch. Use --description to set or update the
 description. At least one flag is required.
 
+When the branch ID is omitted and the terminal is interactive, a picker
+lists the branches in the current project.
+
 Examples:
   memory graph branches update <branch-id> --name "new-name"
   memory graph branches update <branch-id> --description "staging area for Q4 planning"
   memory graph branches update <branch-id> --name "new-name" --description "updated purpose"
 
 ```
-memory graph branches update <id> [flags]
+memory graph branches update [id] [flags]
 ```
 
 ### Options
@@ -3745,10 +3758,10 @@ Configure the LLM provider for a project
 
 Configure the LLM provider credentials for a specific project.
 
-Supported providers: google, google-vertex. Prints the provider name, the
-configured generative model, and the embedding model on success. Use flags
-such as --api-key, --embedding-model, and --generative-model to specify
-credentials and model overrides.
+Supported providers: google, google-vertex, openai, deepseek. Prints the
+provider name, the configured generative model, and the embedding model on
+success. Use flags such as --api-key, --embedding-model, and
+--generative-model to specify credentials and model overrides.
 
 ```
 memory projects set-provider [project-name-or-id] <provider> [flags]
@@ -3757,7 +3770,8 @@ memory projects set-provider [project-name-or-id] <provider> [flags]
 ### Options
 
 ```
-      --api-key string            Google AI API key (for google)
+      --api-key string            API key for the provider
+      --base-url string           OpenAI-compatible base URL (for openai)
       --embedding-model string    Override embedding model for this project
       --gcp-project string        GCP project ID (for google-vertex)
       --generative-model string   Override generative model for this project
@@ -4016,7 +4030,7 @@ memory provider configure-project <provider> [flags]
 
 ```
       --api-key string            API key (required for google)
-      --base-url string           OpenAI-compatible base URL (required for openai-compatible)
+      --base-url string           OpenAI-compatible base URL (required for openai)
       --embedding-model string    Embedding model to use (auto-selected from catalog if omitted)
       --gcp-project string        GCP project ID (required for google-vertex)
       --generative-model string   Generative model to use (auto-selected from catalog if omitted)
@@ -4076,7 +4090,7 @@ Use --type to filter by model type (embedding or generative).
 
 Examples:
   memory provider models
-  memory provider models openai-compatible
+  memory provider models openai
   memory provider models google-vertex
   memory provider models google --type generative
   memory provider models deepseek
@@ -4103,14 +4117,14 @@ Send a live "say hello" generate call to verify that provider credentials
 work end-to-end.
 
 Without a provider argument, tests all configured providers.
-Pass a provider name (google, google-vertex, openai-compatible, or deepseek) to test a specific one.
+Pass a provider name (google, google-vertex, openai, or deepseek) to test a specific one.
 
 Use --project to test using the project-level credential hierarchy
 (project override → org) instead of org credentials only.
 
 Examples:
   memory provider test
-  memory provider test openai-compatible
+  memory provider test openai
   memory provider test deepseek
   memory provider test google-vertex
   memory provider test google --project <id>
@@ -5547,7 +5561,8 @@ On success, prints the full plaintext Token value prominently (this is the only
 time the full token is shown — save it immediately), followed by ID, Name, Type,
 Prefix, Scopes, and Created timestamp.
 
-Valid scopes: schema:read, data:read, data:write, agents:read, agents:write, projects:read, projects:write
+Valid scopes: schema:read, data:read, data:write, agents:read, agents:write, projects:read, projects:write.
+Scopes are comma-separated. Use --scopes all to grant full admin access (admin:all).
 
 ```
 memory tokens create [flags]
@@ -5556,9 +5571,9 @@ memory tokens create [flags]
 ### Options
 
 ```
-  -h, --help            help for create
-      --name string     Token name (required)
-      --scopes string   Comma-separated scopes (default: data:read). Valid: schema:read, data:read, data:write, agents:read, agents:write, projects:read, projects:write
+  -h, --help             help for create
+      --name string      Token name (required)
+      --scopes strings   Comma-separated scopes (e.g. --scopes data:read,data:write). Use --scopes all for full admin access.
 ```
 
 ## memory tokens get
@@ -5633,11 +5648,11 @@ memory tokens regenerate [token-id] [flags]
 
 ## memory tokens revoke
 
-Revoke an API token
+Revoke (delete) an API token
 
 ### Synopsis
 
-Permanently revoke an API token, making it unusable. Without --project, revokes an account-level token.
+Permanently revoke (delete) an API token, making it unusable. Without --project, revokes an account-level token.
 
 ```
 memory tokens revoke [token-id] [flags]
@@ -5647,6 +5662,50 @@ memory tokens revoke [token-id] [flags]
 
 ```
   -h, --help   help for revoke
+```
+
+## memory tokens scopes
+
+List available API token scopes
+
+### Synopsis
+
+List all valid API token scopes with descriptions.
+
+For full account admin access, create a token with --scopes all (grants admin:all).
+
+```
+memory tokens scopes [flags]
+```
+
+### Options
+
+```
+  -h, --help   help for scopes
+```
+
+## memory tokens update-scopes
+
+Update a token's scopes
+
+### Synopsis
+
+Update the scopes of an existing API token.
+
+Without --project, updates an account-level token. With --project, updates a
+project-scoped token.
+
+Use --scopes all for full admin access (admin:all).
+
+```
+memory tokens update-scopes [token-id] [flags]
+```
+
+### Options
+
+```
+  -h, --help             help for update-scopes
+      --scopes strings   Comma-separated scopes (e.g. --scopes data:read,data:write). Use --scopes all for full admin access.
 ```
 
 ## memory traces

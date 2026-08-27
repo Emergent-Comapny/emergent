@@ -49,6 +49,7 @@ type GraphObjectResponse struct {
 	Labels        []string       `json:"labels"`
 	SchemaVersion *string        `json:"schema_version,omitempty"`
 	DeletedAt     *time.Time     `json:"deleted_at,omitempty"`
+	DeleteReason  *string        `json:"delete_reason,omitempty"`
 	ChangeSummary map[string]any `json:"change_summary,omitempty"`
 	ContentHash   *string        `json:"content_hash,omitempty"`
 	// External source fields for data sync
@@ -103,6 +104,7 @@ func (o *GraphObject) ToResponse() *GraphObjectResponse {
 		Labels:            o.Labels,
 		SchemaVersion:     o.SchemaVersion,
 		DeletedAt:         o.DeletedAt,
+		DeleteReason:      o.DeleteReason,
 		ChangeSummary:     o.ChangeSummary,
 		ContentHash:       contentHash,
 		ExternalSource:    o.ExternalSource,
@@ -238,6 +240,7 @@ type GraphRelationshipResponse struct {
 	Properties    map[string]any `json:"properties"`
 	Weight        *float32       `json:"weight,omitempty"`
 	DeletedAt     *time.Time     `json:"deleted_at,omitempty"`
+	DeleteReason  *string        `json:"delete_reason,omitempty"`
 	ChangeSummary map[string]any `json:"change_summary,omitempty"`
 	CreatedAt     time.Time      `json:"created_at"`
 	// InverseRelationship is populated when an inverse relationship was auto-created
@@ -276,6 +279,7 @@ func (r *GraphRelationship) ToResponse() *GraphRelationshipResponse {
 		Properties:    r.Properties,
 		Weight:        r.Weight,
 		DeletedAt:     r.DeletedAt,
+		DeleteReason:  r.DeleteReason,
 		ChangeSummary: r.ChangeSummary,
 		CreatedAt:     r.CreatedAt,
 	}
@@ -821,23 +825,30 @@ type BranchMergeResponse struct {
 	Policy           string     `json:"policy,omitempty"`
 	ConflictStrategy string     `json:"conflict_strategy,omitempty"`
 	// Similarity settings used for this merge
-	SimilarityEnabled   bool                        `json:"similarity_enabled"`
-	SimilarityThreshold float32                     `json:"similarity_threshold,omitempty"`
-	EmbeddingsPending   int                         `json:"embeddings_pending,omitempty"` // source objects without embedding
-	TotalObjects        int                         `json:"total_objects"`
-	UnchangedCount      int                         `json:"unchanged_count"`
-	AddedCount          int                         `json:"added_count"`
-	FastForwardCount    int                         `json:"fast_forward_count"`
-	ConflictCount       int                         `json:"conflict_count"`
-	ResolvedCount       int                         `json:"resolved_count,omitempty"`
-	SkippedCount        int                         `json:"skipped_count,omitempty"`
-	SimilarCount        int                         `json:"similar_count,omitempty"` // objects matched by similarity
-	DeletedCount        *int                        `json:"deleted_count,omitempty"`
-	Objects             []*BranchMergeObjectSummary `json:"objects"`
-	Truncated           bool                        `json:"truncated,omitempty"`
-	HardLimit           *int                        `json:"hard_limit,omitempty"`
-	Applied             bool                        `json:"applied,omitempty"`
-	AppliedObjects      *int                        `json:"applied_objects,omitempty"`
+	SimilarityEnabled   bool    `json:"similarity_enabled"`
+	SimilarityThreshold float32 `json:"similarity_threshold,omitempty"`
+	EmbeddingsPending   int     `json:"embeddings_pending,omitempty"` // source objects without embedding
+	TotalObjects        int     `json:"total_objects"`
+	UnchangedCount      int     `json:"unchanged_count"`
+	AddedCount          int     `json:"added_count"`
+	FastForwardCount    int     `json:"fast_forward_count"`
+	ConflictCount       int     `json:"conflict_count"`
+	// MergedCount is the number of source objects already cloned to the target
+	// by a prior merge (merge ledger) and therefore not re-applied.
+	MergedCount   int `json:"merged_count,omitempty"`
+	ResolvedCount int `json:"resolved_count,omitempty"`
+	SkippedCount  int `json:"skipped_count,omitempty"`
+	SimilarCount  int `json:"similar_count,omitempty"` // objects matched by similarity
+	// LeftForReviewCount is the number of source objects that were NOT merged and
+	// remain on the source branch for human decision (conflicts preserved and
+	// similarity "suggest" matches). Non-zero implies a partial merge.
+	LeftForReviewCount int                         `json:"left_for_review_count,omitempty"`
+	DeletedCount       *int                        `json:"deleted_count,omitempty"`
+	Objects            []*BranchMergeObjectSummary `json:"objects"`
+	Truncated          bool                        `json:"truncated,omitempty"`
+	HardLimit          *int                        `json:"hard_limit,omitempty"`
+	Applied            bool                        `json:"applied,omitempty"`
+	AppliedObjects     *int                        `json:"applied_objects,omitempty"`
 	// Relationship merge info
 	RelationshipsTotal            *int                              `json:"relationships_total,omitempty"`
 	RelationshipsUnchangedCount   *int                              `json:"relationships_unchanged_count,omitempty"`

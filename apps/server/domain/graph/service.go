@@ -3438,7 +3438,7 @@ func (s *Service) MergeBranch(ctx context.Context, projectID uuid.UUID, targetBr
 
 	// Enumerate objects: classify each canonical_id
 	objectSummaries := make([]*BranchMergeObjectSummary, 0)
-	unchangedCount, addedCount, ffCount, conflictCount, deletedCount := 0, 0, 0, 0, 0
+	unchangedCount, addedCount, ffCount, conflictCount, deletedCount, mergedCount := 0, 0, 0, 0, 0, 0
 
 	// Hard limit for enumeration
 	hardLimit := 2000
@@ -3471,42 +3471,23 @@ func (s *Service) MergeBranch(ctx context.Context, projectID uuid.UUID, targetBr
 			summary.TargetHeadID = &targetHead.ID
 		}
 
-		if sourceHead == nil && targetHead != nil {
-			// Exists only on target - unchanged (nothing to merge from source)
-			summary.Status = "unchanged"
+		summary.Status, summary.Conflicts = classifyMergeObject(sourceHead, targetHead)
+
+		switch summary.Status {
+		case "merged":
+			mergedCount++
+		case "unchanged":
 			unchangedCount++
-		} else if sourceHead != nil && sourceHead.DeletedAt != nil && targetHead != nil {
-			// Deleted on source branch, exists on target — classify as "deleted"
-			summary.Status = "deleted"
+		case "added":
+			addedCount++
+		case "fast_forward":
+			ffCount++
+		case "conflict":
+			conflictCount++
+		case "deleted":
 			// For now count as fast_forward (it's a change that needs to be applied)
 			ffCount++
 			deletedCount++
-		} else if sourceHead != nil && sourceHead.DeletedAt != nil && targetHead == nil {
-			// Deleted on source, doesn't exist on target — nothing to do
-			summary.Status = "unchanged"
-			unchangedCount++
-		} else if sourceHead != nil && targetHead == nil {
-			// Exists only on source - added
-			summary.Status = "added"
-			addedCount++
-		} else if sourceHead != nil && targetHead != nil {
-			// Exists on both - compare content hash (covers properties, status, key, labels)
-			if bytesEqual(sourceHead.ContentHash, targetHead.ContentHash) {
-				summary.Status = "unchanged"
-				unchangedCount++
-			} else {
-				// Content differs — find which property keys have conflicting values
-				conflicts := findConflictingPaths(sourceHead.Properties, targetHead.Properties)
-
-				if len(conflicts) > 0 {
-					summary.Status = "conflict"
-					summary.Conflicts = conflicts
-					conflictCount++
-				} else {
-					summary.Status = "fast_forward"
-					ffCount++
-				}
-			}
 		}
 
 		objectSummaries = append(objectSummaries, summary)
@@ -3652,6 +3633,8 @@ func (s *Service) MergeBranch(ctx context.Context, projectID uuid.UUID, targetBr
 	// Pre-compute resolution labels for dry-run display.
 	resolvedCount := 0
 	skippedCount := 0
+	leftForReview := 0
+	leftForReviewObjs := make([]map[string]any, 0)
 	for _, s := range responseObjectSummaries {
 		switch s.Status {
 		case "conflict":
@@ -3665,6 +3648,7 @@ func (s *Service) MergeBranch(ctx context.Context, projectID uuid.UUID, targetBr
 			case "preserve_target":
 				s.Resolution = "skipped"
 				skippedCount++
+				leftForReview++
 			}
 		case "similar":
 			switch settings.SimilarityAction {
@@ -3676,7 +3660,36 @@ func (s *Service) MergeBranch(ctx context.Context, projectID uuid.UUID, targetBr
 				resolvedCount++
 			case "suggest":
 				s.Resolution = "suggested"
+				leftForReview++
 			}
+		}
+
+		// Collect a compact breakdown of objects left for human review, written
+		// into the merge journal event so reviewers can see what merged vs what
+		// did not without re-running a dry-run diff.
+		if s.Resolution == "skipped" || s.Resolution == "suggested" {
+			entry := map[string]any{
+				"canonical_id": s.CanonicalID.String(),
+				"status":       s.Status,
+				"resolution":   s.Resolution,
+			}
+			if src := sourceObjects[s.CanonicalID]; src != nil {
+				entry["type"] = src.Type
+				if name, ok := src.Properties["name"].(string); ok {
+					entry["name"] = name
+				}
+			}
+			if len(s.Conflicts) > 0 {
+				entry["conflicts"] = s.Conflicts
+			}
+			if s.SimilarTargetID != nil {
+				entry["similarity_score"] = s.SimilarityScore
+				entry["similar_target_id"] = s.SimilarTargetID.String()
+				if s.SimilarTargetName != "" {
+					entry["similar_target_name"] = s.SimilarTargetName
+				}
+			}
+			leftForReviewObjs = append(leftForReviewObjs, entry)
 		}
 	}
 
@@ -3697,9 +3710,11 @@ func (s *Service) MergeBranch(ctx context.Context, projectID uuid.UUID, targetBr
 		FastForwardCount:              ffCount,
 		DeletedCount:                  &deletedCount,
 		ConflictCount:                 conflictCount,
+		MergedCount:                   mergedCount,
 		ResolvedCount:                 resolvedCount,
 		SkippedCount:                  skippedCount,
 		SimilarCount:                  similarCount,
+		LeftForReviewCount:            leftForReview,
 		Objects:                       responseObjectSummaries,
 		Truncated:                     truncated,
 		HardLimit:                     &hardLimit,
@@ -3726,20 +3741,37 @@ func (s *Service) MergeBranch(ctx context.Context, projectID uuid.UUID, targetBr
 			if response.RelationshipsTotal != nil {
 				relsMerged = *response.RelationshipsTotal - relUnchanged
 			}
+			targetID := "main"
+			if targetBranchID != nil {
+				targetID = targetBranchID.String()
+			}
+			// Attribute the merge to the source branch so the event appears in that
+			// branch's own journal history, alongside the objects it contained.
 			s.eventSink.Log(ctx, LogParams{
 				ProjectID: projectID,
-				BranchID:  targetBranchID,
+				BranchID:  &req.SourceBranchID,
 				EventType: EventTypeMerge,
 				ActorType: ActorUser,
 				Metadata: map[string]any{
-					"objects_merged":       appliedCount,
-					"relationships_merged": relsMerged,
+					"source_branch_id":        req.SourceBranchID.String(),
+					"target_branch_id":        targetID,
+					"policy":                  req.Policy,
+					"objects_merged":          appliedCount,
+					"relationships_merged":    relsMerged,
+					"objects_added":           addedCount,
+					"objects_fast_forward":    ffCount,
+					"objects_conflict":        conflictCount,
+					"objects_similar":         similarCount,
+					"left_for_review_count":   leftForReview,
+					"left_for_review_objects": leftForReviewObjs,
 				},
 			})
 		}
 
-		// Stamp the source branch as merged.
-		if s.branchStore != nil {
+		// Stamp the source branch as merged only when nothing was left for review.
+		// A partial merge (leftForReview > 0, or relationship conflicts that are
+		// never auto-applied) keeps the branch open for a follow-up manual merge.
+		if s.branchStore != nil && leftForReview == 0 && relConflict == 0 {
 			if err := s.branchStore.SetMergedAt(ctx, req.SourceBranchID.String(), time.Now().UTC()); err != nil {
 				s.log.Warn("failed to stamp branch merged_at",
 					slog.String("branch_id", req.SourceBranchID.String()),
@@ -3839,6 +3871,16 @@ func (s *Service) applyMerge(
 				// Collect for batch embedding enqueue after commit (use physical version ID,
 				// not canonical ID — graph_embedding_jobs.object_id FK references graph_objects.id).
 				embeddingIDs = append(embeddingIDs, clone.ID.String())
+
+				// Stamp the merge ledger on the source object so future merges/diffs
+				// recognize it as already merged instead of "added".
+				if _, err := tx.NewUpdate().
+					Model((*GraphObject)(nil)).
+					Set("merged_to_canonical_id = ?", newCanonicalID).
+					Where("id = ?", src.ID).
+					Exec(ctx); err != nil {
+					return 0, fmt.Errorf("stamp merged_to on object %s: %w", cid, err)
+				}
 			}
 
 		case "fast_forward":
@@ -4204,6 +4246,10 @@ func resolveMergePolicy(policy, legacyConflictStrategy string, thresholdOverride
 		"mine":          {true, defaultThreshold, "mine", "overwrite"},
 		"mine_no_sim":   {false, 0, "", "overwrite"},
 		"suggest":       {true, defaultThreshold, "suggest", "block"},
+		// "partial" merges clean changes (added/fast_forward/deleted) into the
+		// target but leaves ambiguous items — canonical conflicts and
+		// semantically-similar duplicates — on the source branch for review.
+		"partial": {true, defaultThreshold, "suggest", "preserve_target"},
 	}
 
 	if policy == "" && legacyConflictStrategy == "" {
@@ -4301,6 +4347,44 @@ func findConflictingPaths(sourceProps, targetProps map[string]any) []string {
 	return conflicts
 }
 
+// classifyMergeObject classifies a single object for a branch merge.
+// Returns the merge status ("merged", "unchanged", "added", "fast_forward",
+// "conflict", "deleted") and, for conflicts, the conflicting property paths.
+func classifyMergeObject(sourceHead, targetHead *BranchObjectHead) (status string, conflicts []string) {
+	if sourceHead != nil && sourceHead.MergedToCanonicalID != nil {
+		// Already cloned to a target branch by a prior merge (merge ledger).
+		return "merged", nil
+	}
+
+	switch {
+	case sourceHead == nil && targetHead != nil:
+		// Exists only on target — unchanged (nothing to merge from source).
+		return "unchanged", nil
+	case sourceHead != nil && sourceHead.DeletedAt != nil && targetHead != nil:
+		// Deleted on source branch, exists on target.
+		return "deleted", nil
+	case sourceHead != nil && sourceHead.DeletedAt != nil && targetHead == nil:
+		// Deleted on source, doesn't exist on target — nothing to do.
+		return "unchanged", nil
+	case sourceHead != nil && targetHead == nil:
+		// Exists only on source — added.
+		return "added", nil
+	case sourceHead != nil && targetHead != nil:
+		// Exists on both — compare content hash (covers properties, status, key, labels).
+		if bytesEqual(sourceHead.ContentHash, targetHead.ContentHash) {
+			return "unchanged", nil
+		}
+		// Content differs — find which property keys have conflicting values.
+		conflicts := findConflictingPaths(sourceHead.Properties, targetHead.Properties)
+		if len(conflicts) > 0 {
+			return "conflict", conflicts
+		}
+		return "fast_forward", nil
+	}
+
+	return "unchanged", nil
+}
+
 func sortMergeObjectSummaries(summaries []*BranchMergeObjectSummary) {
 	statusOrder := map[string]int{
 		"conflict":     0,
@@ -4308,6 +4392,7 @@ func sortMergeObjectSummaries(summaries []*BranchMergeObjectSummary) {
 		"fast_forward": 2,
 		"added":        3,
 		"unchanged":    4,
+		"merged":       5,
 	}
 	sort.Slice(summaries, func(i, j int) bool {
 		return statusOrder[summaries[i].Status] < statusOrder[summaries[j].Status]

@@ -5,6 +5,29 @@ Owners: Graph / Backend
 Last Updated: 2025-09-29
 Related Specs: `19-dynamic-object-graph.md` (branching concepts), `20-graph-overview.md` (marketing summary), `04-data-model.md` (core tables)
 
+> **Current Implementation (2026-08-27):** This MVP design predates the shipped
+> merge implementation, which evolved significantly. Live behavior:
+>
+> - `POST /api/graph/branches/:targetBranchId/merge` — dry-run (`execute:false`)
+>   or apply (`execute:true`). `policy` presets: `enrich` (default),
+>   `enrich_no_sim`, `theirs`, `mine`, `mine_no_sim`, `suggest`, `manual`,
+>   `partial`. `partial` merges clean items (added/fast_forward/deleted) and
+>   leaves conflicts + semantically-similar duplicates on the source branch for
+>   review. `wait_for_embeddings` gates on embedding readiness;
+>   `similarity_threshold` (default 0.92) tunes duplicate detection.
+> - `GET /api/graph/branches/:branchId/compare?target=main|<uuid>` — structural
+>   diff (no similarity probe) returning per-object status: `merged` / `unchanged`
+>   / `added` / `fast_forward` / `conflict` / `deleted`.
+> - **Merge ledger** (`kb.graph_objects.merged_to_canonical_id`, migration 00130):
+>   records the target canonical_id a source object was cloned to, so "already
+>   merged" is distinguishable from "pending" on re-merge/compare.
+> - **Auto-merge** (`kb.projects.auto_merge_extraction_branches`, migration
+>   00129): auto-merges extraction staging branches into main after extraction
+>   (wait-for-embeddings, `partial` policy).
+> - Merge events are journaled (`kb.project_journal`, event `merge`) with a full
+>   merged-vs-left breakdown (`left_for_review_objects`, counts, policy),
+>   attributed to the source branch.
+
 ## 1. Goal & Non-Goals
 **Goal (MVP):** Enable merging changes from a feature branch into a target branch (usually `main`) for versioned graph **objects** (nodes) with deterministic conflict detection leveraging existing per-version `change_summary` and version chains.
 

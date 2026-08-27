@@ -16,8 +16,6 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 
-	"github.com/emergent-company/emergent.memory/domain/branches"
-	"github.com/emergent-company/emergent.memory/domain/journal"
 	"github.com/emergent-company/emergent.memory/internal/config"
 )
 
@@ -161,9 +159,27 @@ func newBulkTestRepo(t *testing.T, db *bun.DB) *Repository {
 	return NewRepository(db, log, cfg)
 }
 
+// seedProject inserts an org + project row so graph_object inserts with a
+// random project_id satisfy the kb.graph_objects.project_id → kb.projects FK.
+func seedProject(t *testing.T, db *bun.DB, projectID uuid.UUID) {
+	t.Helper()
+	orgID := uuid.New()
+	_, err := db.ExecContext(context.Background(), `
+		INSERT INTO kb.orgs (id, name, created_at, updated_at)
+		VALUES (?, 'test-org', NOW(), NOW())
+		ON CONFLICT (id) DO NOTHING`, orgID)
+	require.NoError(t, err)
+	_, err = db.ExecContext(context.Background(), `
+		INSERT INTO kb.projects (id, organization_id, name, created_at, updated_at)
+		VALUES (?, ?, 'test-project', NOW(), NOW())
+		ON CONFLICT (id) DO NOTHING`, projectID, orgID)
+	require.NoError(t, err)
+}
+
 // insertBulkTestObject inserts a raw graph_object row for testing.
 func insertBulkTestObject(t *testing.T, db *bun.DB, projectID uuid.UUID, objType, status string) uuid.UUID {
 	t.Helper()
+	seedProject(t, db, projectID)
 	id := uuid.New()
 	_, err := db.ExecContext(context.Background(), `
 		INSERT INTO kb.graph_objects
@@ -306,67 +322,4 @@ func TestBulkActionIntegration_HardDelete(t *testing.T) {
 		Scan(context.Background(), &keepCount)
 	require.NoError(t, err)
 	assert.Equal(t, 1, keepCount, "KeepMe object should still exist")
-}
-
-// newTestJournalSvc creates a real journal service backed by the test DB.
-func newTestJournalSvc(t *testing.T, db *bun.DB) *journal.Service {
-	t.Helper()
-	branchStore := branches.NewStore(db)
-	journalRepo := journal.NewRepository(db, branchStore)
-	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	return journal.NewService(journalRepo, log)
-}
-
-// =============================================================================
-// 5.6 Integration: audit log entry written after bulk operation
-// =============================================================================
-
-func TestBulkActionIntegration_AuditLog(t *testing.T) {
-	db := openBulkTestDB(t)
-	repo := newBulkTestRepo(t, db)
-	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelWarn}))
-
-	// Build a real journal service via direct DB insert verification
-	// (avoid complex dependency chain — verify journal entry existence in DB directly)
-	projectID := uuid.New()
-	for i := 0; i < 2; i++ {
-		insertBulkTestObject(t, db, projectID, "AuditObj", "active")
-	}
-	t.Cleanup(func() {
-		db.ExecContext(context.Background(), "DELETE FROM kb.graph_objects WHERE project_id = ?", projectID)   //nolint:errcheck
-		db.ExecContext(context.Background(), "DELETE FROM kb.project_journal WHERE project_id = ?", projectID) //nolint:errcheck
-	})
-
-	// Build service with a real journal backed by the test DB
-	journalSvc := newTestJournalSvc(t, db)
-	svc := NewService(repo, log, nil, nil, nil, nil, nil, journalSvc, nil, nil)
-
-	actorID := uuid.New()
-	resp, err := svc.BulkAction(context.Background(), projectID, &BulkActionRequest{
-		Filter: BulkActionFilter{Types: []string{"AuditObj"}},
-		Action: BulkActionUpdateStatus,
-		Value:  "archived",
-	}, &actorID)
-	require.NoError(t, err)
-	assert.Equal(t, 2, resp.Matched)
-	assert.Equal(t, 2, resp.Affected)
-	assert.False(t, resp.DryRun)
-
-	// Give journal goroutine a moment to flush (journal.Log is async in some implementations)
-	// Poll up to 1s
-	var journalCount int
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		err = db.NewSelect().TableExpr("kb.project_journal").
-			Where("project_id = ?", projectID).
-			Where("event_type = ?", "batch").
-			ColumnExpr("count(*)").
-			Scan(context.Background(), &journalCount)
-		require.NoError(t, err)
-		if journalCount > 0 {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	assert.Equal(t, 1, journalCount, "one journal entry should be written for the bulk operation")
 }

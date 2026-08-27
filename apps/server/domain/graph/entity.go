@@ -20,6 +20,12 @@ type GraphObject struct {
 	SupersedesID *uuid.UUID `bun:"supersedes_id,type:uuid" json:"supersedes_id,omitempty"`
 	Version      int        `bun:"version,notnull,default:1" json:"version"`
 
+	// MergedToCanonicalID points to the target-branch canonical_id this object
+	// was cloned to during a merge (the merge ledger). Non-nil on source-branch
+	// objects means "already merged"; used by compare/diff to distinguish merged
+	// from pending.
+	MergedToCanonicalID *uuid.UUID `bun:"merged_to_canonical_id,type:uuid" json:"merged_to_canonical_id,omitempty"`
+
 	Type      string  `bun:"type,notnull" json:"type"`
 	Key       *string `bun:"key" json:"key,omitempty"`
 	Status    *string `bun:"status" json:"status,omitempty"`

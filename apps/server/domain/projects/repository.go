@@ -261,7 +261,7 @@ func (r *Repository) CheckDuplicateName(ctx context.Context, db bun.IDB, orgID, 
 func (r *Repository) Create(ctx context.Context, tx bun.Tx, project *Project) error {
 	_, err := tx.NewInsert().
 		Model(project).
-		Returning("id, organization_id, name, project_info, chat_prompt_template, auto_extract_objects, auto_extract_config, created_at, updated_at").
+		Returning("id, organization_id, name, project_info, chat_prompt_template, auto_extract_objects, auto_extract_config, created_at, updated_at, auto_merge_extraction_branches").
 		Exec(ctx)
 
 	if err != nil {
@@ -298,7 +298,7 @@ func (r *Repository) Update(ctx context.Context, project *Project) error {
 	_, err := r.db.NewUpdate().
 		Model(project).
 		WherePK().
-		Returning("id, organization_id, name, project_info, chat_prompt_template, auto_extract_objects, auto_extract_config, created_at, updated_at").
+		Returning("id, organization_id, name, project_info, chat_prompt_template, auto_extract_objects, auto_extract_config, created_at, updated_at, auto_merge_extraction_branches").
 		Exec(ctx)
 
 	if err != nil {
