@@ -24,8 +24,12 @@ type Project struct {
 	ChunkingConfig          map[string]any `bun:"chunking_config,type:jsonb" json:"chunking_config,omitempty"`
 	AllowParallelExtraction *bool          `bun:"allow_parallel_extraction" json:"allow_parallel_extraction,omitempty"`
 	ExtractionConfig        map[string]any `bun:"extraction_config,type:jsonb" json:"extraction_config,omitempty"`
-	DeletedAt               *time.Time     `bun:"deleted_at" json:"deleted_at,omitempty"`
-	DeletedBy               *string        `bun:"deleted_by,type:uuid" json:"deleted_by,omitempty"`
+
+	// AutoMergeExtractionBranches enables auto-merging extraction staging branches
+	// into the main graph once extraction completes (partial merge; added in migration 00129).
+	AutoMergeExtractionBranches bool       `bun:"auto_merge_extraction_branches,notnull,default:false" json:"auto_merge_extraction_branches"`
+	DeletedAt                   *time.Time `bun:"deleted_at" json:"deleted_at,omitempty"`
+	DeletedBy                   *string    `bun:"deleted_by,type:uuid" json:"deleted_by,omitempty"`
 
 	// Budget columns added in migration 00063
 	BudgetUSD            *float64 `bun:"budget_usd" json:"budget_usd,omitempty"`
@@ -113,6 +117,8 @@ type ProjectDTO struct {
 	AutoExtractConfig  map[string]any `json:"auto_extract_config,omitempty"`
 	BudgetUSD          *float64       `json:"budget_usd,omitempty"`
 	Stats              *ProjectStats  `json:"stats,omitempty"`
+	// AutoMergeExtractionBranches is emitted only when true.
+	AutoMergeExtractionBranches *bool `json:"auto_merge_extraction_branches,omitempty"`
 	// MainBranchID is the UUID of the project's root branch (parent_branch_id IS NULL).
 	// Callers can use this as targetBranchID when merging without knowing the branch UUID,
 	// or pass the magic string "main" to the merge endpoint directly.
@@ -140,13 +146,14 @@ type CreateProjectRequest struct {
 
 // UpdateProjectRequest is the request body for updating a project
 type UpdateProjectRequest struct {
-	Name                 *string        `json:"name,omitempty" validate:"omitempty,min=1"`
-	ProjectInfo          *string        `json:"project_info,omitempty"`
-	ChatPromptTemplate   *string        `json:"chat_prompt_template,omitempty"`
-	AutoExtractObjects   *bool          `json:"auto_extract_objects,omitempty"`
-	AutoExtractConfig    map[string]any `json:"auto_extract_config,omitempty"`
-	BudgetUSD            *float64       `json:"budget_usd,omitempty"`
-	BudgetAlertThreshold *float64       `json:"budget_alert_threshold,omitempty"`
+	Name                        *string        `json:"name,omitempty" validate:"omitempty,min=1"`
+	ProjectInfo                 *string        `json:"project_info,omitempty"`
+	ChatPromptTemplate          *string        `json:"chat_prompt_template,omitempty"`
+	AutoExtractObjects          *bool          `json:"auto_extract_objects,omitempty"`
+	AutoExtractConfig           map[string]any `json:"auto_extract_config,omitempty"`
+	BudgetUSD                   *float64       `json:"budget_usd,omitempty"`
+	BudgetAlertThreshold        *float64       `json:"budget_alert_threshold,omitempty"`
+	AutoMergeExtractionBranches *bool          `json:"auto_merge_extraction_branches,omitempty"`
 }
 
 // ToDTO converts a Project entity to ProjectDTO
@@ -166,6 +173,10 @@ func (p *Project) ToDTO() ProjectDTO {
 	if p.AutoExtractObjects {
 		val := p.AutoExtractObjects
 		dto.AutoExtractObjects = &val
+	}
+	if p.AutoMergeExtractionBranches {
+		val := p.AutoMergeExtractionBranches
+		dto.AutoMergeExtractionBranches = &val
 	}
 
 	// Include config fields if they exist

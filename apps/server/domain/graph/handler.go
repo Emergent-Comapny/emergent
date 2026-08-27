@@ -1939,6 +1939,56 @@ func (h *Handler) MergeReadiness(c echo.Context) error {
 	})
 }
 
+// CompareBranches returns a structural diff of a source branch against a target
+// (main by default), including objects already merged from the source branch to
+// the target by a prior merge (status "merged").
+// @Summary      Compare a branch against another
+// @Description  Returns per-object status: merged / unchanged / added / fast_forward / conflict / similar / deleted. Target defaults to "main".
+// @Tags         graph
+// @Produce      json
+// @Param        project_id path string true "Project ID"
+// @Param        branchId path string true "Source branch ID"
+// @Param        target query string false "Target branch ID or 'main' (default 'main')"
+// @Success      200 {object} BranchMergeResponse
+// @Router       /api/graph/branches/{branchId}/compare [get]
+func (h *Handler) CompareBranches(c echo.Context) error {
+	user := auth.GetUser(c)
+	if user == nil {
+		return apperror.ErrUnauthorized
+	}
+
+	projectID, err := getProjectID(c)
+	if err != nil {
+		return apperror.ErrBadRequest.WithMessage("invalid project_id")
+	}
+
+	sourceID, err := uuid.Parse(c.Param("branchId"))
+	if err != nil {
+		return apperror.ErrBadRequest.WithMessage("invalid branch_id")
+	}
+
+	var targetBranchID *uuid.UUID
+	targetParam := c.QueryParam("target")
+	if targetParam != "" && targetParam != "main" && targetParam != "null" {
+		parsed, err := uuid.Parse(targetParam)
+		if err != nil {
+			return apperror.ErrBadRequest.WithMessage("invalid target branch id (use a UUID or 'main')")
+		}
+		targetBranchID = &parsed
+	}
+
+	result, err := h.svc.MergeBranch(c.Request().Context(), projectID, targetBranchID, &BranchMergeRequest{
+		SourceBranchID: sourceID,
+		Execute:        false,
+		Policy:         "manual",
+	})
+	if err != nil {
+		return err
+	}
+
+	return c.JSON(http.StatusOK, result)
+}
+
 // =============================================================================
 // Analytics Handlers
 // =============================================================================

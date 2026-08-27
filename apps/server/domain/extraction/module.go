@@ -342,6 +342,7 @@ func provideObjectExtractionWorker(
 	graphService *graph.Service,
 	branchService *branches.Service,
 	docService *documents.Service,
+	projectsRepo *projects.Repository,
 	schemaProvider *MemorySchemaProvider,
 	modelFactory *adk.ModelFactory,
 	embeds *embeddings.Service,
@@ -367,7 +368,7 @@ func provideObjectExtractionWorker(
 	)
 	// Wire shared cached embedding service into schema provider (for vector classification).
 	schemaProvider.WithEmbeddingService(cachedEmbeds)
-	return NewObjectExtractionWorker(jobs, graphService, branchService, docService, schemaProvider, modelFactory, embeds, workerConfig, log, scaler).
+	return NewObjectExtractionWorker(jobs, graphService, branchService, docService, projectsRepo, schemaProvider, modelFactory, embeds, workerConfig, log, scaler).
 		WithLimitResolver(limitResolver)
 }
 

@@ -30,7 +30,7 @@ func (s *DeleteReasonSuite) SetupSuite() {
 
 func (s *DeleteReasonSuite) createTestObject() string {
 	resp := s.Client.POST(
-		"/api/projects/"+s.ProjectID+"/graph/objects",
+		"/api/graph/objects",
 		testutil.WithAuth("e2e-test-user"),
 		testutil.WithProjectID(s.ProjectID),
 		testutil.WithOrgID(s.OrgID),
@@ -47,7 +47,7 @@ func (s *DeleteReasonSuite) createTestObject() string {
 
 func (s *DeleteReasonSuite) createTestRelationship(srcID, dstID string) string {
 	resp := s.Client.POST(
-		"/api/projects/"+s.ProjectID+"/graph/relationships",
+		"/api/graph/relationships",
 		testutil.WithAuth("e2e-test-user"),
 		testutil.WithProjectID(s.ProjectID),
 		testutil.WithOrgID(s.OrgID),
@@ -66,7 +66,7 @@ func (s *DeleteReasonSuite) createTestRelationship(srcID, dstID string) string {
 // getObjectHistoryTombstone fetches history and returns the first (latest) version.
 func (s *DeleteReasonSuite) getObjectHistoryTombstone(id string) map[string]any {
 	resp := s.Client.GET(
-		"/api/projects/"+s.ProjectID+"/graph/objects/"+id+"/history",
+		"/api/graph/objects/"+id+"/history",
 		testutil.WithAuth("e2e-test-user"),
 		testutil.WithProjectID(s.ProjectID),
 		testutil.WithOrgID(s.OrgID),
@@ -83,7 +83,7 @@ func (s *DeleteReasonSuite) getObjectHistoryTombstone(id string) map[string]any 
 // getRelationshipHistoryTombstone returns the latest relationship version.
 func (s *DeleteReasonSuite) getRelationshipHistoryTombstone(id string) map[string]any {
 	resp := s.Client.GET(
-		"/api/projects/"+s.ProjectID+"/graph/relationships/"+id+"/history",
+		"/api/graph/relationships/"+id+"/history",
 		testutil.WithAuth("e2e-test-user"),
 		testutil.WithProjectID(s.ProjectID),
 		testutil.WithOrgID(s.OrgID),
@@ -103,7 +103,7 @@ func (s *DeleteReasonSuite) TestDeleteWithReason_SetsField() {
 	id := s.createTestObject()
 
 	resp := s.Client.DELETE(
-		"/api/projects/"+s.ProjectID+"/graph/objects/"+id,
+		"/api/graph/objects/"+id,
 		testutil.WithAuth("e2e-test-user"),
 		testutil.WithProjectID(s.ProjectID),
 		testutil.WithOrgID(s.OrgID),
@@ -120,7 +120,7 @@ func (s *DeleteReasonSuite) TestDeleteWithoutReason_NullField() {
 	id := s.createTestObject()
 
 	resp := s.Client.DELETE(
-		"/api/projects/"+s.ProjectID+"/graph/objects/"+id,
+		"/api/graph/objects/"+id,
 		testutil.WithAuth("e2e-test-user"),
 		testutil.WithProjectID(s.ProjectID),
 		testutil.WithOrgID(s.OrgID),
@@ -137,7 +137,7 @@ func (s *DeleteReasonSuite) TestDeleteReason_LongText() {
 	longReason := strings.Repeat("x", 1000)
 
 	resp := s.Client.DELETE(
-		"/api/projects/"+s.ProjectID+"/graph/objects/"+id,
+		"/api/graph/objects/"+id,
 		testutil.WithAuth("e2e-test-user"),
 		testutil.WithProjectID(s.ProjectID),
 		testutil.WithOrgID(s.OrgID),
@@ -154,7 +154,7 @@ func (s *DeleteReasonSuite) TestDeleteReason_RestoredObjectHasNullReason() {
 
 	// Delete with reason
 	resp := s.Client.DELETE(
-		"/api/projects/"+s.ProjectID+"/graph/objects/"+id,
+		"/api/graph/objects/"+id,
 		testutil.WithAuth("e2e-test-user"),
 		testutil.WithProjectID(s.ProjectID),
 		testutil.WithOrgID(s.OrgID),
@@ -164,7 +164,7 @@ func (s *DeleteReasonSuite) TestDeleteReason_RestoredObjectHasNullReason() {
 
 	// Restore
 	restoreResp := s.Client.POST(
-		"/api/projects/"+s.ProjectID+"/graph/objects/"+id+"/restore",
+		"/api/graph/objects/"+id+"/restore",
 		testutil.WithAuth("e2e-test-user"),
 		testutil.WithProjectID(s.ProjectID),
 		testutil.WithOrgID(s.OrgID),
@@ -180,7 +180,7 @@ func (s *DeleteReasonSuite) TestDeleteReason_RestoredObjectHasNullReason() {
 	tombstone := s.getObjectHistoryTombstone(id)
 	// Tombstone is no longer the latest after restore — find it in history
 	resp2 := s.Client.GET(
-		"/api/projects/"+s.ProjectID+"/graph/objects/"+id+"/history",
+		"/api/graph/objects/"+id+"/history",
 		testutil.WithAuth("e2e-test-user"),
 		testutil.WithProjectID(s.ProjectID),
 		testutil.WithOrgID(s.OrgID),
@@ -213,7 +213,7 @@ func (s *DeleteReasonSuite) TestDeleteReason_RelationshipDelete() {
 	relID := s.createTestRelationship(srcID, dstID)
 
 	resp := s.Client.DELETE(
-		"/api/projects/"+s.ProjectID+"/graph/relationships/"+relID,
+		"/api/graph/relationships/"+relID,
 		testutil.WithAuth("e2e-test-user"),
 		testutil.WithProjectID(s.ProjectID),
 		testutil.WithOrgID(s.OrgID),
@@ -232,7 +232,7 @@ func (s *DeleteReasonSuite) TestDeleteRelationship_WithoutReason_NullField() {
 	relID := s.createTestRelationship(srcID, dstID)
 
 	resp := s.Client.DELETE(
-		"/api/projects/"+s.ProjectID+"/graph/relationships/"+relID,
+		"/api/graph/relationships/"+relID,
 		testutil.WithAuth("e2e-test-user"),
 		testutil.WithProjectID(s.ProjectID),
 		testutil.WithOrgID(s.OrgID),
@@ -249,6 +249,7 @@ func (s *DeleteReasonSuite) TestDeleteRelationship_WithoutReason_NullField() {
 
 func (s *DeleteReasonSuite) TestMCPEntityDelete_WithReason() {
 	s.SkipIfExternalServer("MCP tool test requires direct DB inspection")
+	s.T().Skip("MCP /tools/execute route removed; MCP moved to JSON-RPC (tools/call). delete_reason covered by HTTP handler tests + mcp domain tests.")
 	id := s.createTestObject()
 
 	resp := s.Client.POST(
@@ -273,6 +274,7 @@ func (s *DeleteReasonSuite) TestMCPEntityDelete_WithReason() {
 
 func (s *DeleteReasonSuite) TestMCPEntityDelete_WithoutReason() {
 	s.SkipIfExternalServer("MCP tool test requires direct DB inspection")
+	s.T().Skip("MCP /tools/execute route removed; MCP moved to JSON-RPC (tools/call). delete_reason covered by HTTP handler tests + mcp domain tests.")
 	id := s.createTestObject()
 
 	resp := s.Client.POST(
@@ -296,6 +298,7 @@ func (s *DeleteReasonSuite) TestMCPEntityDelete_WithoutReason() {
 
 func (s *DeleteReasonSuite) TestMCPRelationshipDelete_WithReason() {
 	s.SkipIfExternalServer("MCP tool test requires direct DB inspection")
+	s.T().Skip("MCP /tools/execute route removed; MCP moved to JSON-RPC (tools/call). delete_reason covered by HTTP handler tests + mcp domain tests.")
 	srcID := s.createTestObject()
 	dstID := s.createTestObject()
 	relID := s.createTestRelationship(srcID, dstID)

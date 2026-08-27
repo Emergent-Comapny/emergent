@@ -158,6 +158,7 @@ LIMIT 20;
 | `tsv`, `fts`                 | Full-text search tsvector columns                          |
 | `canonical_id`               | Immutable ID across versions                               |
 | `supersedes_id`              | Previous version reference                                 |
+| `merged_to_canonical_id`     | Target-branch canonical_id an object was cloned to during a merge (merge ledger) |
 
 ## Important Notes
 

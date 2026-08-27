@@ -17,6 +17,7 @@ import (
 	"github.com/emergent-company/emergent.memory/domain/documents"
 	"github.com/emergent-company/emergent.memory/domain/extraction/agents"
 	"github.com/emergent-company/emergent.memory/domain/graph"
+	"github.com/emergent-company/emergent.memory/domain/projects"
 	"github.com/emergent-company/emergent.memory/pkg/adk"
 	"github.com/emergent-company/emergent.memory/pkg/auth"
 	"github.com/emergent-company/emergent.memory/pkg/logger"
@@ -82,6 +83,7 @@ type ObjectExtractionWorker struct {
 	graphService          *graph.Service
 	branchService         *branches.Service
 	docService            *documents.Service
+	projectsRepo          *projects.Repository
 	schemaProvider        SchemaProvider
 	modelFactory          *adk.ModelFactory
 	classifier            *DocumentClassifier
@@ -101,6 +103,7 @@ func NewObjectExtractionWorker(
 	graphService *graph.Service,
 	branchService *branches.Service,
 	docService *documents.Service,
+	projectsRepo *projects.Repository,
 	schemaProvider SchemaProvider,
 	modelFactory *adk.ModelFactory,
 	embeddingService EmbeddingService,
@@ -116,6 +119,7 @@ func NewObjectExtractionWorker(
 		graphService:   graphService,
 		branchService:  branchService,
 		docService:     docService,
+		projectsRepo:   projectsRepo,
 		schemaProvider: schemaProvider,
 		modelFactory:   modelFactory,
 		classifier:     NewDocumentClassifier(modelFactory, embeddingService, log),
@@ -446,7 +450,100 @@ func (w *ObjectExtractionWorker) processJob(ctx context.Context, job *ObjectExtr
 	if totalResult == nil {
 		totalResult = &ObjectExtractionResults{}
 	}
+
+	// Auto-merge the staging branch into main when the project opts in.
+	// Best-effort: failures are logged and the branch is left for manual review.
+	if stagingBranchID != nil && w.autoMergeEnabled(ctx, job.ProjectID) {
+		w.autoMergeExtractionBranch(ctx, job, *stagingBranchID)
+	}
+
 	return totalResult, nil
+}
+
+// autoMergeEnabled reports whether the project has auto-merge enabled.
+func (w *ObjectExtractionWorker) autoMergeEnabled(ctx context.Context, projectID string) bool {
+	if w.projectsRepo == nil {
+		return false
+	}
+	project, err := w.projectsRepo.GetByID(ctx, projectID, false)
+	if err != nil {
+		w.log.Warn("could not read project auto-merge setting", logger.Error(err))
+		return false
+	}
+	return project != nil && project.AutoMergeExtractionBranches
+}
+
+// autoMergeExtractionBranch waits for the staging branch to be fully embedded,
+// then performs a partial merge into the main graph: clean additions and
+// fast-forwards are applied, while conflicting/similar objects are left on the
+// branch for human review. It is best-effort — failures never block extraction.
+func (w *ObjectExtractionWorker) autoMergeExtractionBranch(ctx context.Context, job *ObjectExtractionJob, branchID uuid.UUID) {
+	projectID, err := uuid.Parse(job.ProjectID)
+	if err != nil {
+		w.log.Warn("auto-merge skipped: invalid project id",
+			slog.String("job_id", job.ID), logger.Error(err))
+		return
+	}
+
+	if err := w.waitForEmbeddings(ctx, projectID, branchID); err != nil {
+		w.log.Warn("auto-merge skipped: embeddings not settled",
+			slog.String("job_id", job.ID),
+			slog.String("branch_id", branchID.String()),
+			logger.Error(err))
+		return
+	}
+
+	req := &graph.BranchMergeRequest{
+		SourceBranchID:    branchID,
+		Execute:           true,
+		Policy:            "partial",
+		WaitForEmbeddings: true,
+	}
+	result, err := w.graphService.MergeBranch(ctx, projectID, nil, req)
+	if err != nil {
+		w.log.Warn("auto-merge failed, branch left for manual merge",
+			slog.String("job_id", job.ID),
+			slog.String("branch_id", branchID.String()),
+			logger.Error(err))
+		return
+	}
+
+	w.log.Info("extraction branch auto-merged",
+		slog.String("job_id", job.ID),
+		slog.String("branch_id", branchID.String()),
+		slog.Int("added", result.AddedCount),
+		slog.Int("fast_forward", result.FastForwardCount),
+		slog.Int("conflicts", result.ConflictCount),
+		slog.Int("similar", result.SimilarCount),
+		slog.Int("left_for_review", result.LeftForReviewCount))
+}
+
+// waitForEmbeddings polls merge readiness until every object on the branch has
+// an embedding (or a timeout elapses), so similarity classification has full
+// coverage before the partial merge runs.
+func (w *ObjectExtractionWorker) waitForEmbeddings(ctx context.Context, projectID, branchID uuid.UUID) error {
+	const (
+		timeout  = 2 * time.Minute
+		interval = 5 * time.Second
+	)
+	deadline := time.Now().Add(timeout)
+	for {
+		_, pending, err := w.graphService.BranchMergeReadiness(ctx, projectID, branchID)
+		if err != nil {
+			return fmt.Errorf("readiness check: %w", err)
+		}
+		if pending == 0 {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out waiting for %d embeddings", pending)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(interval):
+		}
+	}
 }
 
 // truncateToInputLimit caps documentText to the model's max_input_tokens.

@@ -293,6 +293,11 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateProjectReques
 		hasUpdates = true
 	}
 
+	if req.AutoMergeExtractionBranches != nil {
+		project.AutoMergeExtractionBranches = *req.AutoMergeExtractionBranches
+		hasUpdates = true
+	}
+
 	if req.AutoExtractConfig != nil {
 		project.AutoExtractConfig = req.AutoExtractConfig
 		hasUpdates = true

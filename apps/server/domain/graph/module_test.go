@@ -302,7 +302,7 @@ func TestSchemaProviderExcludesRemovedSchemas(t *testing.T) {
 
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
-		dsn = "postgres://emergent:local-test-password@127.0.0.1:5436/emergent?sslmode=disable"
+		dsn = "postgres://emergent:emergent@localhost:5436/emergent?sslmode=disable"
 	}
 
 	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
@@ -340,10 +340,10 @@ func TestSchemaProviderExcludesRemovedSchemas(t *testing.T) {
 
 	// Seed: two graph_schemas rows (old version, new version)
 	_, err = db.NewRaw(`
-		INSERT INTO kb.graph_schemas (id, name, version, object_type_schemas, relationship_type_schemas, visibility, draft, created_at, updated_at)
+		INSERT INTO kb.graph_schemas (id, name, version, object_type_schemas, relationship_type_schemas, created_at, updated_at)
 		VALUES
-			(?::uuid, 'test-schema-regression-111', '1.0.0', ?::jsonb, '{}'::jsonb, 'project', false, NOW(), NOW()),
-			(?::uuid, 'test-schema-regression-111', '2.0.0', ?::jsonb, '{}'::jsonb, 'project', false, NOW(), NOW())
+			(?::uuid, 'test-schema-regression-111', '1.0.0', ?::jsonb, '{}'::jsonb, NOW(), NOW()),
+			(?::uuid, 'test-schema-regression-111', '2.0.0', ?::jsonb, '{}'::jsonb, NOW(), NOW())
 		ON CONFLICT (id) DO UPDATE SET
 			object_type_schemas = EXCLUDED.object_type_schemas,
 			relationship_type_schemas = EXCLUDED.relationship_type_schemas,

@@ -239,6 +239,7 @@ func NewTestServerWithLLM(testDB *TestDB) *TestServer {
 		graphSvc,
 		nil, // branchService — objects go to main graph
 		docsSvc,
+		nil, // projectsRepo — auto-merge not exercised in tests
 		extractionSchemaProvider,
 		modelFactory,
 		embeddingsSvc,
