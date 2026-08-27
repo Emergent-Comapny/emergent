@@ -672,7 +672,6 @@ const $nhcName    = document.getElementById('nhc-name');
 const $nhcProps   = document.getElementById('nhc-props');
 const $nhcEdges   = document.getElementById('nhc-edges');
 let hoverHideTimer = null;
-let _sigmaNodeHovered = false; // true while sigma's enterNode is active (cursor on dot)
 
 // Top-5 property keys to skip (already shown in header or rarely useful)
 const HC_SKIP_KEYS = new Set(['name', 'title', 'id', 'canonical_id', 'entity_id', 'type']);
@@ -687,6 +686,15 @@ const CHIP_H     = 30; // 9 + 2 + 11 + 8 (fixed regardless of text)
 // Measure approximate chip width for a node, given its rendered size.
 // We use an off-screen canvas for text measurement to stay accurate.
 const _measureCtx = (() => { const c = document.createElement('canvas'); return c.getContext('2d'); })();
+
+// Node display size in viewport pixels (applies Sigma's size scaling).
+function displayedNodeSize(rawSize) {
+  if (sigmaInstance && typeof sigmaInstance.scaleSize === 'function') {
+    return sigmaInstance.scaleSize(rawSize);
+  }
+  return rawSize;
+}
+
 function chipBounds(node) {
   if (!sigmaInstance || !graph.hasNode(node)) return null;
   const attrs   = graph.getNodeAttributes(node);
@@ -703,42 +711,58 @@ function chipBounds(node) {
   const chipW   = CHIP_PAD + CHIP_DOT_R * 2 + CHIP_GAP + textW + CHIP_PAD;
 
   const vp      = sigmaInstance.graphToViewport({ x: attrs.x, y: attrs.y });
-  const size    = sigmaInstance.getNodeDisplayData(node)?.size ?? attrs.size ?? 14;
+  const size    = displayedNodeSize(sigmaInstance.getNodeDisplayData(node)?.size ?? attrs.size ?? 14);
   const chipX   = vp.x + size + 6;
   const chipY   = vp.y - CHIP_H / 2;
 
   return { x: chipX, y: chipY, w: chipW, h: CHIP_H, vp, size };
 }
 
-// Called on every mousemove over the sigma canvas when no dot is hovered.
+// Called on every mousemove over the sigma canvas. Detects the cursor over a
+// node circle OR its label chip and shows the hover card accordingly.
 function handleChipMouseMove(clientX, clientY) {
-  if (_sigmaNodeHovered) return; // dot hover takes precedence
   const container = document.getElementById('sigma-container');
   if (!container) return;
   const rect = container.getBoundingClientRect();
   const cx = clientX - rect.left; // coords relative to container
   const cy = clientY - rect.top;
 
+  const showFor = (node, vp) => {
+    const d = nodeData[node] || {};
+    const attrs = graph.getNodeAttributes(node);
+    showHoverCard(
+      node,
+      rect.left + vp.x,
+      rect.top + vp.y,
+      attrs.color || '#8b949e',
+      d.type || attrs.nodeType || '',
+      attrs.label || '',
+      d.properties || null
+    );
+  };
+
   for (const node of graph.nodes()) {
+    const attrs = graph.getNodeAttributes(node);
+    if (attrs.hidden) continue;
+
+    // Node circle hit-test (works regardless of whether a chip is drawn).
+    const vp = sigmaInstance.graphToViewport({ x: attrs.x, y: attrs.y });
+    const size = displayedNodeSize(sigmaInstance.getNodeDisplayData(node)?.size ?? attrs.size ?? 14);
+    const dx = cx - vp.x;
+    const dy = cy - vp.y;
+    if (dx * dx + dy * dy <= (size + 2) * (size + 2)) {
+      showFor(node, vp);
+      return;
+    }
+
+    // Label chip hit-test (drawn to the right of the circle).
     const b = chipBounds(node);
-    if (!b) continue;
-    if (cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h) {
-      // Cursor is inside this node's chip
-      const d = nodeData[node] || {};
-      const attrs = graph.getNodeAttributes(node);
-      showHoverCard(
-        node,
-        rect.left + b.vp.x,
-        rect.top  + b.vp.y,
-        attrs.color || '#8b949e',
-        d.type || attrs.nodeType || '',
-        attrs.label || '',
-        d.properties || null
-      );
+    if (b && cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h) {
+      showFor(node, b.vp);
       return;
     }
   }
-  // Not over any chip — hide after short delay
+  // Not over any circle or chip — hide after short delay
   hideHoverCard(60);
 }
 
@@ -808,12 +832,18 @@ function populateHoverCard(nodeId, color, typeName, label, inGraphProps) {
         if (propsToShow.length >= HC_MAX_PROPS) break;
       }
     }
+    // Render properties as a two-column grid (key | value) for readability.
+    $nhcProps.className = '';
+    $nhcProps.style.cssText =
+      'display:grid;grid-template-columns:minmax(0,5.5rem) 1fr;column-gap:8px;row-gap:2px;align-items:baseline';
     for (const { k, val } of propsToShow) {
-      const row = document.createElement('div');
-      row.className = 'flex gap-1.5 items-baseline';
-      row.innerHTML = `<span style="color:#8b949e;font-size:10px;white-space:nowrap">${escHtml(k)}</span>`
-        + `<span style="color:#e6edf3;font-size:11px;font-family:monospace;word-break:break-all;flex:1">${escHtml(val.slice(0, 80))}</span>`;
-      $nhcProps.appendChild(row);
+      const keyEl = document.createElement('span');
+      keyEl.style.cssText = 'color:#8b949e;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      keyEl.textContent = k;
+      const valEl = document.createElement('span');
+      valEl.style.cssText = 'color:#e6edf3;font-size:11px;font-family:monospace;word-break:break-all;min-width:0';
+      valEl.textContent = val.slice(0, 80);
+      $nhcProps.append(keyEl, valEl);
     }
 
     // Edge count in graph
@@ -856,6 +886,17 @@ function escHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// No-op node program. Sigma re-draws the hovered node's circle in a WebGL
+// layer above the label canvases, which would cover the icon drawn inside the
+// circle on hover. Disabling that re-draw keeps the icon visible.
+class NoopNodeProgram {
+  constructor() {}
+  process() {}
+  render() {}
+  reallocate() {}
+  kill() {}
+}
+
 // ── Sigma init ────────────────────────────────────────────────────────────
 function initSigma() {
   sigmaInstance = new Sigma(graph, document.getElementById('sigma-container'), {
@@ -870,6 +911,7 @@ function initSigma() {
     minCameraRatio: 0.05, maxCameraRatio: 20,
     defaultDrawNodeLabel: drawNodeLabel,
     defaultDrawNodeHover: drawNodeHoverLabel,
+    nodeHoverProgramClasses: { circle: NoopNodeProgram },
 
     nodeReducer(node, data) {
       const res = { ...data };
@@ -978,40 +1020,16 @@ function initSigma() {
   });
   sigmaInstance.on('clickStage', () => deselectNode());
 
-  // Hover card on canvas nodes
-  sigmaInstance.on('enterNode', ({ node }) => {
-    if (dragState) return; // don't show while dragging
-    _sigmaNodeHovered = true;
-    const d = nodeData[node] || {};
-    const attrs = graph.getNodeAttributes(node);
-    const vp = sigmaInstance.graphToViewport({ x: attrs.x, y: attrs.y });
-    const container = document.getElementById('sigma-container');
-    const rect = container.getBoundingClientRect();
-    showHoverCard(
-      node,
-      rect.left + vp.x,
-      rect.top + vp.y,
-      attrs.color || '#8b949e',
-      d.type || attrs.nodeType || '',
-      attrs.label || '',
-      d.properties || null
-    );
-  });
-  sigmaInstance.on('leaveNode', () => {
-    _sigmaNodeHovered = false;
-    hideHoverCard(80);
-  });
-
-  // Also show hover card when cursor moves over the chip (drawn outside the node dot).
-  // We listen on sigma-container itself (always exists) rather than the canvas element
-  // to avoid any canvas creation timing issues.
+  // Hover card on canvas nodes: unified detection over both the node circle and
+  // its label chip, driven by mousemove on the sigma container. We listen on
+  // sigma-container itself (always exists) rather than the canvas element to
+  // avoid any canvas creation timing issues.
   const sigmaContainer = document.getElementById('sigma-container');
   sigmaContainer.addEventListener('mousemove', (e) => {
     if (dragState) return;
     handleChipMouseMove(e.clientX, e.clientY);
   });
   sigmaContainer.addEventListener('mouseleave', () => {
-    _sigmaNodeHovered = false;
     hideHoverCard(80);
   });
 
