@@ -19,6 +19,9 @@ func RegisterRoutes(e *echo.Echo, h *Handler, authMiddleware *auth.Middleware) {
 	// Streaming endpoint - POST /api/chat/stream
 	g.POST("/stream", h.StreamChat)
 
+	// Answer an agent question and stream the resumed agent output.
+	g.POST("/questions/:questionId/respond", h.StreamRespondQuestion)
+
 	// Conversation CRUD
 	g.GET("/conversations", h.ListConversations)
 	g.POST("/conversations", h.CreateConversation)

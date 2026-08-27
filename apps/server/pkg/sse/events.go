@@ -18,6 +18,10 @@ const (
 
 	// EventDone is the final event, signaling end of stream.
 	EventDone ChatEventType = "done"
+
+	// EventQuestion is emitted when an agent asks the user a clarifying
+	// question and pauses execution awaiting an answer.
+	EventQuestion ChatEventType = "question"
 )
 
 // MetaEvent is the first event in a chat stream containing metadata.
@@ -126,5 +130,39 @@ func NewDoneEventWithRunAndTrace(runID, traceID string) DoneEvent {
 		Type:    string(EventDone),
 		RunID:   runID,
 		TraceID: traceID,
+	}
+}
+
+// QuestionOption is a single selectable option in an agent question.
+type QuestionOption struct {
+	Label       string `json:"label"`
+	Value       string `json:"value"`
+	Description string `json:"description,omitempty"`
+}
+
+// QuestionEvent is emitted when an agent pauses to ask the user a clarifying
+// question. The client renders the question and answers via the respond route.
+type QuestionEvent struct {
+	Type            string           `json:"type"`
+	QuestionID      string           `json:"questionId"`
+	RunID           string           `json:"runId,omitempty"`
+	Question        string           `json:"question"`
+	Options         []QuestionOption `json:"options"`
+	InteractionType string           `json:"interactionType"`
+	Placeholder     string           `json:"placeholder,omitempty"`
+	MaxLength       int              `json:"maxLength,omitempty"`
+}
+
+// NewQuestionEvent creates a question event.
+func NewQuestionEvent(questionID, runID, question string, options []QuestionOption, interactionType, placeholder string, maxLength int) QuestionEvent {
+	return QuestionEvent{
+		Type:            string(EventQuestion),
+		QuestionID:      questionID,
+		RunID:           runID,
+		Question:        question,
+		Options:         options,
+		InteractionType: interactionType,
+		Placeholder:     placeholder,
+		MaxLength:       maxLength,
 	}
 }

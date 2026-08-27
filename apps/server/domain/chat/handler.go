@@ -927,12 +927,16 @@ func (h *Handler) streamAgentChat(ctx context.Context, conv *Conversation, messa
 	var fullResponse strings.Builder
 
 	// Build the StreamCallback that maps executor events to SSE events
+	var askUserInput map[string]any
 	streamCallback := func(event agents.StreamEvent) {
 		switch event.Type {
 		case agents.StreamEventTextDelta:
 			fullResponse.WriteString(event.Text)
 			sseWriter.WriteData(sse.NewTokenEvent(event.Text))
 		case agents.StreamEventToolCallStart:
+			if event.Tool == agents.ToolNameAskUser {
+				askUserInput = event.Input
+			}
 			sseWriter.WriteData(sse.NewMCPToolEvent(event.Tool, "started", event.Input, ""))
 		case agents.StreamEventToolCallEnd:
 			status := "completed"
@@ -940,6 +944,11 @@ func (h *Handler) streamAgentChat(ctx context.Context, conv *Conversation, messa
 				status = "error"
 			}
 			sseWriter.WriteData(sse.NewMCPToolEvent(event.Tool, status, event.Output, event.Error))
+			if event.Tool == agents.ToolNameAskUser && status == "completed" {
+				if qev, ok := questionEventFromAskUser(askUserInput, event.Output); ok {
+					sseWriter.WriteData(qev)
+				}
+			}
 		case agents.StreamEventError:
 			sseWriter.WriteData(sse.NewErrorEvent(event.Error))
 		}
@@ -1120,6 +1129,200 @@ func (h *Handler) streamAgentChat(ctx context.Context, conv *Conversation, messa
 	}
 
 	return result
+}
+
+// questionEventFromAskUser builds a question SSE event from the ask_user tool's
+// input arguments (captured on ToolCallStart) and its output (question_id on
+// ToolCallEnd). Returns ok=false when the output lacks a question_id.
+func questionEventFromAskUser(input, output map[string]any) (sse.QuestionEvent, bool) {
+	q := sse.QuestionEvent{Type: string(sse.EventQuestion)}
+	if output != nil {
+		id, _ := output["question_id"].(string)
+		q.QuestionID = id
+	}
+	if q.QuestionID == "" {
+		return q, false
+	}
+	if input != nil {
+		if s, ok := input["question"].(string); ok {
+			q.Question = s
+		}
+		if s, ok := input["interaction_type"].(string); ok {
+			q.InteractionType = s
+		}
+		if q.InteractionType == "" {
+			q.InteractionType = "buttons"
+		}
+		if s, ok := input["placeholder"].(string); ok {
+			q.Placeholder = s
+		}
+		switch v := input["max_length"].(type) {
+		case float64:
+			q.MaxLength = int(v)
+		case int:
+			q.MaxLength = v
+		case int64:
+			q.MaxLength = int(v)
+		}
+		if opts, ok := input["options"].([]any); ok {
+			for _, o := range opts {
+				m, ok := o.(map[string]any)
+				if !ok {
+					continue
+				}
+				opt := sse.QuestionOption{}
+				if l, ok := m["label"].(string); ok {
+					opt.Label = l
+				}
+				if v, ok := m["value"].(string); ok {
+					opt.Value = v
+				}
+				if d, ok := m["description"].(string); ok {
+					opt.Description = d
+				}
+				q.Options = append(q.Options, opt)
+			}
+		}
+	}
+	return q, true
+}
+
+// RespondToQuestionRequest is the body for answering an agent question and
+// streaming the resumed agent output.
+type RespondToQuestionRequest struct {
+	Response string `json:"response"`
+}
+
+// StreamRespondQuestion handles POST /api/chat/questions/:questionId/respond.
+// It answers a pending agent question, resumes the paused run, and streams the
+// resumed output as SSE (token/mcp_tool/done).
+func (h *Handler) StreamRespondQuestion(c echo.Context) error {
+	user := auth.GetUser(c)
+	if user == nil {
+		return apperror.ErrUnauthorized
+	}
+	projectID := user.ProjectID
+	if projectID == "" {
+		projectID = auth.ProjectIDFromContext(c.Request().Context())
+	}
+	if projectID == "" {
+		return apperror.ErrBadRequest.WithMessage("x-project-id header required")
+	}
+
+	questionID := c.Param("questionId")
+	if questionID == "" {
+		return apperror.NewBadRequest("questionId is required")
+	}
+
+	var req RespondToQuestionRequest
+	if err := c.Bind(&req); err != nil {
+		return apperror.NewBadRequest("invalid request body")
+	}
+	if strings.TrimSpace(req.Response) == "" {
+		return apperror.NewBadRequest("response is required")
+	}
+
+	ctx := c.Request().Context()
+	if auth.ProjectIDFromContext(ctx) == "" {
+		ctx = auth.ContextWithProjectID(ctx, projectID)
+	}
+
+	question, err := h.agentRepo.FindQuestionByID(ctx, questionID)
+	if err != nil {
+		return apperror.NewInternal("failed to get question", err)
+	}
+	if question == nil {
+		return apperror.NewNotFound("AgentQuestion", questionID)
+	}
+	if question.ProjectID != projectID {
+		return apperror.NewNotFound("AgentQuestion", questionID)
+	}
+	if question.Status != agents.QuestionStatusPending {
+		return apperror.ErrConflict.WithMessage(fmt.Sprintf("question is already %s", question.Status))
+	}
+
+	run, err := h.agentRepo.FindRunByID(ctx, question.RunID)
+	if err != nil {
+		return apperror.NewInternal("failed to get run", err)
+	}
+	if run == nil {
+		return apperror.NewInternal("associated run not found", nil)
+	}
+	if run.Status != agents.RunStatusPaused {
+		return apperror.ErrConflict.WithMessage(fmt.Sprintf("run is %s, expected paused", run.Status))
+	}
+
+	if err := h.agentRepo.AnswerQuestion(ctx, questionID, req.Response, user.ID); err != nil {
+		return apperror.NewInternal("failed to answer question", err)
+	}
+
+	agent, err := h.agentRepo.FindByID(ctx, run.AgentID, nil)
+	if err != nil || agent == nil {
+		return apperror.NewInternal("failed to find agent for resume", err)
+	}
+	agentDef, _ := h.agentRepo.ResolveDefinitionForAgent(ctx, agent)
+	orgID := user.OrgID
+	if orgID == "" {
+		orgID, _ = h.agentRepo.GetOrgIDByProjectID(ctx, projectID)
+	}
+
+	userMessage := fmt.Sprintf(
+		"Previously you asked: %q\nThe user responded: %q\nContinue from where you left off.",
+		question.Question, req.Response,
+	)
+
+	w := c.Response().Writer
+	sseWriter := sse.NewWriter(w)
+	if err := sseWriter.Start(); err != nil {
+		return apperror.ErrInternal.WithMessage("failed to start SSE stream")
+	}
+
+	streamCallback := func(event agents.StreamEvent) {
+		switch event.Type {
+		case agents.StreamEventTextDelta:
+			sseWriter.WriteData(sse.NewTokenEvent(event.Text))
+		case agents.StreamEventToolCallStart:
+			sseWriter.WriteData(sse.NewMCPToolEvent(event.Tool, "started", event.Input, ""))
+		case agents.StreamEventToolCallEnd:
+			status := "completed"
+			if event.Error != "" {
+				status = "error"
+			}
+			sseWriter.WriteData(sse.NewMCPToolEvent(event.Tool, status, event.Output, event.Error))
+		case agents.StreamEventError:
+			sseWriter.WriteData(sse.NewErrorEvent(event.Error))
+		}
+	}
+
+	resumeReq := agents.ExecuteRequest{
+		Agent:           agent,
+		AgentDefinition: agentDef,
+		ProjectID:       projectID,
+		OrgID:           orgID,
+		UserMessage:     userMessage,
+		UserID:          user.ID,
+		AuthToken:       auth.RawTokenFromContext(c.Request().Context()),
+		StreamCallback:  streamCallback,
+	}
+
+	result, resumeErr := h.agentExecutor.Resume(ctx, run, resumeReq)
+	if resumeErr != nil {
+		sseWriter.WriteData(sse.NewErrorEvent(friendlyProviderError(resumeErr)))
+		sseWriter.WriteData(sse.NewDoneEvent())
+		sseWriter.Close()
+		return nil
+	}
+	if result != nil && result.Status == agents.RunStatusError {
+		if errMsg, ok := result.Summary["error"].(string); ok && errMsg != "" {
+			sseWriter.WriteData(sse.NewErrorEvent(friendlyProviderError(fmt.Errorf("%s", errMsg))))
+		}
+	}
+	if result != nil && result.Cleanup != nil {
+		go result.Cleanup()
+	}
+	sseWriter.WriteData(sse.NewDoneEvent())
+	sseWriter.Close()
+	return nil
 }
 
 // QueryStreamRequest is the request body for the stateless query endpoint.

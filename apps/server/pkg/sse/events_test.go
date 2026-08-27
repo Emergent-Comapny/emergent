@@ -1,6 +1,7 @@
 package sse
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -265,5 +266,63 @@ func TestMetaEventFields(t *testing.T) {
 	}
 	if event.GraphNeighbors == nil {
 		t.Error("GraphNeighbors should not be nil after setting")
+	}
+}
+
+func TestNewQuestionEvent(t *testing.T) {
+	opts := []QuestionOption{
+		{Label: "Dark", Value: "dark", Description: "dark theme"},
+		{Label: "Light", Value: "light"},
+	}
+	ev := NewQuestionEvent("qid", "runid", "Which theme?", opts, "buttons", "pick one", 120)
+
+	if ev.Type != string(EventQuestion) {
+		t.Errorf("Type = %q, want %q", ev.Type, string(EventQuestion))
+	}
+	if ev.QuestionID != "qid" || ev.RunID != "runid" || ev.Question != "Which theme?" {
+		t.Errorf("identity fields = %+v", ev)
+	}
+	if ev.InteractionType != "buttons" || ev.Placeholder != "pick one" || ev.MaxLength != 120 {
+		t.Errorf("input fields = %+v", ev)
+	}
+	if len(ev.Options) != 2 || ev.Options[0].Value != "dark" || ev.Options[1].Value != "light" {
+		t.Errorf("Options = %+v", ev.Options)
+	}
+}
+
+func TestQuestionEventJSONShape(t *testing.T) {
+	ev := NewQuestionEvent(
+		"qid", "runid", "What color?",
+		[]QuestionOption{{Label: "Red", Value: "red", Description: "warm"}},
+		"buttons", "choose", 0,
+	)
+	b, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if m["type"] != "question" {
+		t.Errorf("type = %v, want question", m["type"])
+	}
+	if m["questionId"] != "qid" || m["runId"] != "runid" || m["question"] != "What color?" {
+		t.Errorf("keys = %v", m)
+	}
+	if m["interactionType"] != "buttons" || m["placeholder"] != "choose" {
+		t.Errorf("keys = %v", m)
+	}
+	opts, ok := m["options"].([]any)
+	if !ok || len(opts) != 1 {
+		t.Fatalf("options = %v", m["options"])
+	}
+	o0, ok := opts[0].(map[string]any)
+	if !ok || o0["label"] != "Red" || o0["value"] != "red" || o0["description"] != "warm" {
+		t.Errorf("options[0] = %v", opts[0])
+	}
+	if _, exists := m["maxLength"]; exists {
+		t.Errorf("maxLength should be omitted when zero, got %v", m["maxLength"])
 	}
 }
