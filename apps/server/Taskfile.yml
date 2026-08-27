@@ -72,17 +72,29 @@ tasks:
   migrate:up:
     desc: Run database migrations up
     cmds:
-      - go run ./cmd/migrate up
+      - go run ./cmd/migrate -c up
+    env:
+      DB_HOST: "{{.POSTGRES_HOST}}"
+      DB_PORT: "{{.POSTGRES_PORT}}"
+      POSTGRES_DATABASE: "{{.POSTGRES_DB}}"
 
   migrate:down:
     desc: Run database migrations down
     cmds:
-      - go run ./cmd/migrate down
+      - go run ./cmd/migrate -c down
+    env:
+      DB_HOST: "{{.POSTGRES_HOST}}"
+      DB_PORT: "{{.POSTGRES_PORT}}"
+      POSTGRES_DATABASE: "{{.POSTGRES_DB}}"
 
   migrate:status:
     desc: Show migration status
     cmds:
-      - go run ./cmd/migrate status
+      - go run ./cmd/migrate -c status
+    env:
+      DB_HOST: "{{.POSTGRES_HOST}}"
+      DB_PORT: "{{.POSTGRES_PORT}}"
+      POSTGRES_DATABASE: "{{.POSTGRES_DB}}"
 
   swagger:
     desc: Generate swagger docs
