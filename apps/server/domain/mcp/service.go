@@ -3471,7 +3471,7 @@ func (s *Service) executeGraphBranchDelete(ctx context.Context, projectID string
 	if err != nil || branchID == nil {
 		return nil, fmt.Errorf("resolve branch: %w", err)
 	}
-	if err := s.branchSvc.Delete(ctx, branchID.String()); err != nil {
+	if err := s.branchSvc.Delete(ctx, branchID.String(), projectID); err != nil {
 		return nil, fmt.Errorf("delete branch: %w", err)
 	}
 	return s.wrapResult(map[string]any{

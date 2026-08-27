@@ -2,7 +2,6 @@ package branches
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,7 +14,6 @@ import (
 )
 
 // stubService satisfies the handler's dependency on *Service without a real DB.
-// We embed a nil *Service and override only what we need via a closure field.
 type stubListService struct {
 	capturedProjectID *string
 	branches          []*BranchResponse
@@ -27,8 +25,11 @@ func (s *stubListService) List(_ context.Context, projectID *string) ([]*BranchR
 	return s.branches, s.err
 }
 
-// handlerWithStub builds an echo context + handler that uses a stub list func.
-func runListHandler(t *testing.T, stub *stubListService, queryProjectID, headerProjectID, tokenProjectID string) (int, []*BranchResponse) {
+// runListHandler builds an echo context + handler that uses a stub list func.
+// It returns the HTTP status written to the recorder and the error returned by
+// the handler (handlers return apperror values directly, which Echo's error
+// middleware would normally translate into an HTTP status).
+func runListHandler(t *testing.T, stub *stubListService, queryProjectID, headerProjectID, tokenProjectID string) (int, error) {
 	t.Helper()
 
 	e := echo.New()
@@ -51,20 +52,12 @@ func runListHandler(t *testing.T, stub *stubListService, queryProjectID, headerP
 	}
 	c.Set(string(auth.UserContextKey), user)
 
-	// Build a minimal handler that calls stub.List directly (bypasses real *Service)
 	h := &testableListHandler{svc: stub}
 	err := h.List(c)
-	require.NoError(t, err)
-
-	var result []*BranchResponse
-	if rec.Code == http.StatusOK {
-		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
-	}
-	return rec.Code, result
+	return rec.Code, err
 }
 
 // testableListHandler duplicates the List handler logic for testing, using the stubListService.
-// This mirrors handler.go:List exactly so that we verify the real scoping logic.
 type testableListHandler struct {
 	svc interface {
 		List(ctx context.Context, projectID *string) ([]*BranchResponse, error)
@@ -77,17 +70,12 @@ func (h *testableListHandler) List(c echo.Context) error {
 		return echo.ErrUnauthorized
 	}
 
-	var projectID *string
-	if pid := c.QueryParam("project_id"); pid != "" {
-		projectID = &pid
-	} else {
-		// Mirrors handler.go: fall back to X-Project-ID / API token
-		if ctxPID, err := auth.GetProjectID(c); err == nil && ctxPID != "" {
-			projectID = &ctxPID
-		}
+	projectID, err := resolveProjectID(c)
+	if err != nil {
+		return err
 	}
 
-	branches, err := h.svc.List(c.Request().Context(), projectID)
+	branches, err := h.svc.List(c.Request().Context(), &projectID)
 	if err != nil {
 		return err
 	}
@@ -108,7 +96,7 @@ func TestListHandler_ProjectScoping(t *testing.T) {
 		headerProjectID string
 		tokenProjectID  string
 		wantProjectID   *string
-		wantUnscoped    bool // true means we expect nil projectID (all branches)
+		wantErr         bool
 	}{
 		{
 			name:            "query param takes precedence over header",
@@ -127,32 +115,26 @@ func TestListHandler_ProjectScoping(t *testing.T) {
 			wantProjectID:  ptr(projectA),
 		},
 		{
-			name:         "no scoping when no project context at all",
-			wantUnscoped: true,
-		},
-		{
-			name:           "invalid query param UUID rejected — returns 400 via real handler",
-			queryProjectID: "not-a-uuid",
-			// This case is tested separately below (error path)
+			name:    "no project context returns bad request",
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.queryProjectID == "not-a-uuid" {
-				t.Skip("error path tested separately")
-			}
-
 			stub := &stubListService{branches: []*BranchResponse{}}
-			code, _ := runListHandler(t, stub, tt.queryProjectID, tt.headerProjectID, tt.tokenProjectID)
-			assert.Equal(t, http.StatusOK, code)
+			code, err := runListHandler(t, stub, tt.queryProjectID, tt.headerProjectID, tt.tokenProjectID)
 
-			if tt.wantUnscoped {
-				assert.Nil(t, stub.capturedProjectID, "expected nil (unscoped) projectID")
-			} else {
-				require.NotNil(t, stub.capturedProjectID)
-				assert.Equal(t, *tt.wantProjectID, *stub.capturedProjectID)
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Nil(t, stub.capturedProjectID)
+				return
 			}
+
+			assert.NoError(t, err)
+			assert.Equal(t, http.StatusOK, code)
+			require.NotNil(t, stub.capturedProjectID)
+			assert.Equal(t, *tt.wantProjectID, *stub.capturedProjectID)
 		})
 	}
 }

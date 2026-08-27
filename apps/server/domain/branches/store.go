@@ -25,9 +25,11 @@ func (s *Store) List(ctx context.Context, projectID *string) ([]*Branch, error) 
 	q := s.db.NewSelect().Model(&branches).Order("created_at ASC")
 
 	if projectID != nil {
-		// Include branches owned by the project AND the root/main branch that
-		// may have project_id IS NULL in legacy rows (pre-backfill migration).
-		q = q.Where("project_id = ? OR (project_id IS NULL AND parent_branch_id IS NULL)", *projectID)
+		// Project-scoped: only branches owned by this project. Legacy root
+		// branches with project_id IS NULL were backfilled by migrations
+		// 00122/00123, so any remaining NULL rows are org-global test/bench
+		// branches that must not leak into a project's list.
+		q = q.Where("project_id = ?", *projectID)
 	}
 
 	err := q.Scan(ctx)
@@ -38,12 +40,13 @@ func (s *Store) List(ctx context.Context, projectID *string) ([]*Branch, error) 
 	return branches, nil
 }
 
-// GetByID returns a branch by ID
-func (s *Store) GetByID(ctx context.Context, id string) (*Branch, error) {
+// GetByID returns a branch by ID, scoped to the given project.
+func (s *Store) GetByID(ctx context.Context, id, projectID string) (*Branch, error) {
 	branch := new(Branch)
 	err := s.db.NewSelect().
 		Model(branch).
 		Where("id = ?", id).
+		Where("project_id = ?", projectID).
 		Scan(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -89,13 +92,14 @@ func (s *Store) Create(ctx context.Context, branch *Branch) (*Branch, error) {
 	return branch, nil
 }
 
-// Update updates a branch by ID
-func (s *Store) Update(ctx context.Context, id string, name string, description *string) (*Branch, error) {
+// Update updates a branch by ID, scoped to the given project.
+func (s *Store) Update(ctx context.Context, id, projectID, name string, description *string) (*Branch, error) {
 	branch := new(Branch)
 	q := s.db.NewUpdate().
 		Model(branch).
 		Set("name = ?", name).
 		Where("id = ?", id).
+		Where("project_id = ?", projectID).
 		Returning("*")
 
 	if description != nil {
@@ -115,11 +119,12 @@ func (s *Store) Update(ctx context.Context, id string, name string, description 
 	return branch, nil
 }
 
-// Delete deletes a branch by ID, returns true if deleted
-func (s *Store) Delete(ctx context.Context, id string) (bool, error) {
+// Delete deletes a branch by ID, scoped to the given project. Returns true if deleted.
+func (s *Store) Delete(ctx context.Context, id, projectID string) (bool, error) {
 	result, err := s.db.NewDelete().
 		Model((*Branch)(nil)).
 		Where("id = ?", id).
+		Where("project_id = ?", projectID).
 		Exec(ctx)
 	if err != nil {
 		return false, err

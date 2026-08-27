@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/emergent-company/emergent.memory/pkg/apperror"
 )
 
@@ -27,9 +29,9 @@ func (s *Service) List(ctx context.Context, projectID *string) ([]*BranchRespons
 	return ToResponseList(branches), nil
 }
 
-// GetByID returns a branch by ID
-func (s *Service) GetByID(ctx context.Context, id string) (*BranchResponse, error) {
-	branch, err := s.store.GetByID(ctx, id)
+// GetByID returns a branch by ID, scoped to the given project.
+func (s *Service) GetByID(ctx context.Context, id, projectID string) (*BranchResponse, error) {
+	branch, err := s.store.GetByID(ctx, id, projectID)
 	if err != nil {
 		return nil, apperror.ErrInternal.WithInternal(err)
 	}
@@ -42,6 +44,15 @@ func (s *Service) GetByID(ctx context.Context, id string) (*BranchResponse, erro
 
 // Create creates a new branch
 func (s *Service) Create(ctx context.Context, req *CreateBranchRequest) (*BranchResponse, error) {
+	// Branches must always be project-scoped. A project_id is mandatory so
+	// that org-global (project_id IS NULL) branches can never be created.
+	if req.ProjectID == nil || strings.TrimSpace(*req.ProjectID) == "" {
+		return nil, apperror.ErrBadRequest.WithMessage("project_id is required")
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(*req.ProjectID)); err != nil {
+		return nil, apperror.ErrBadRequest.WithMessage("invalid project_id format")
+	}
+
 	// Validate name
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
@@ -59,7 +70,7 @@ func (s *Service) Create(ctx context.Context, req *CreateBranchRequest) (*Branch
 
 	// If parent_branch_id provided, verify it exists
 	if req.ParentBranchID != nil {
-		parent, err := s.store.GetByID(ctx, *req.ParentBranchID)
+		parent, err := s.store.GetByID(ctx, *req.ParentBranchID, *req.ProjectID)
 		if err != nil {
 			return nil, apperror.ErrInternal.WithInternal(err)
 		}
@@ -95,10 +106,10 @@ func (s *Service) Create(ctx context.Context, req *CreateBranchRequest) (*Branch
 	return ToResponse(created), nil
 }
 
-// Update updates a branch by ID
-func (s *Service) Update(ctx context.Context, id string, req *UpdateBranchRequest) (*BranchResponse, error) {
-	// Check if branch exists
-	existing, err := s.store.GetByID(ctx, id)
+// Update updates a branch by ID, scoped to the given project.
+func (s *Service) Update(ctx context.Context, id, projectID string, req *UpdateBranchRequest) (*BranchResponse, error) {
+	// Check if branch exists within the project
+	existing, err := s.store.GetByID(ctx, id, projectID)
 	if err != nil {
 		return nil, apperror.ErrInternal.WithInternal(err)
 	}
@@ -131,7 +142,7 @@ func (s *Service) Update(ctx context.Context, id string, req *UpdateBranchReques
 	}
 
 	// Update the branch
-	updated, err := s.store.Update(ctx, id, name, req.Description)
+	updated, err := s.store.Update(ctx, id, projectID, name, req.Description)
 	if err != nil {
 		return nil, apperror.ErrInternal.WithInternal(err)
 	}
@@ -142,12 +153,12 @@ func (s *Service) Update(ctx context.Context, id string, req *UpdateBranchReques
 	return ToResponse(updated), nil
 }
 
-// Delete deletes a branch by ID
-func (s *Service) Delete(ctx context.Context, id string) error {
+// Delete deletes a branch by ID, scoped to the given project.
+func (s *Service) Delete(ctx context.Context, id, projectID string) error {
 	// Delete lineage first (best-effort)
 	_ = s.store.DeleteBranchLineage(ctx, id)
 
-	deleted, err := s.store.Delete(ctx, id)
+	deleted, err := s.store.Delete(ctx, id, projectID)
 	if err != nil {
 		return apperror.ErrInternal.WithInternal(err)
 	}

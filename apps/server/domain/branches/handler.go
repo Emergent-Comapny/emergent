@@ -20,6 +20,22 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
+// resolveProjectID resolves the project ID for branch-scoped operations from
+// (in priority order) the ?project_id query param, then X-Project-ID header /
+// API token binding. Returns a bad-request error when none is resolvable.
+func resolveProjectID(c echo.Context) (string, error) {
+	if pid := c.QueryParam("project_id"); pid != "" {
+		if _, err := uuid.Parse(pid); err != nil {
+			return "", apperror.ErrBadRequest.WithMessage("invalid project_id format")
+		}
+		return pid, nil
+	}
+	if contextPID, err := auth.GetProjectID(c); err == nil && contextPID != "" {
+		return contextPID, nil
+	}
+	return "", apperror.ErrBadRequest.WithMessage("project_id required")
+}
+
 // List handles GET /api/graph/branches
 // @Summary      List branches
 // @Description  Returns branches for the current project. Project is resolved from (in priority order): ?project_id query param, X-Project-ID header, API token project binding.
@@ -40,18 +56,12 @@ func (h *Handler) List(c echo.Context) error {
 		return apperror.ErrUnauthorized
 	}
 
-	// Resolve project ID: explicit query param takes precedence, then X-Project-ID / API token.
-	var projectID *string
-	if pid := c.QueryParam("project_id"); pid != "" {
-		if _, err := uuid.Parse(pid); err != nil {
-			return apperror.ErrBadRequest.WithMessage("invalid project_id format")
-		}
-		projectID = &pid
-	} else if contextPID, err := auth.GetProjectID(c); err == nil && contextPID != "" {
-		projectID = &contextPID
+	projectID, err := resolveProjectID(c)
+	if err != nil {
+		return err
 	}
 
-	branches, err := h.svc.List(c.Request().Context(), projectID)
+	branches, err := h.svc.List(c.Request().Context(), &projectID)
 	if err != nil {
 		return err
 	}
@@ -89,7 +99,12 @@ func (h *Handler) GetByID(c echo.Context) error {
 		return apperror.ErrBadRequest.WithMessage("invalid branch id format")
 	}
 
-	branch, err := h.svc.GetByID(c.Request().Context(), id)
+	projectID, err := resolveProjectID(c)
+	if err != nil {
+		return err
+	}
+
+	branch, err := h.svc.GetByID(c.Request().Context(), id, projectID)
 	if err != nil {
 		return err
 	}
@@ -119,6 +134,21 @@ func (h *Handler) Create(c echo.Context) error {
 	var req CreateBranchRequest
 	if err := c.Bind(&req); err != nil {
 		return apperror.ErrBadRequest.WithMessage("invalid request body")
+	}
+
+	// Resolve project ID: explicit body field takes precedence, then query
+	// param, then X-Project-ID header / API token binding. Branches must
+	// always be project-scoped.
+	if req.ProjectID == nil || *req.ProjectID == "" {
+		var pid string
+		if p := c.QueryParam("project_id"); p != "" {
+			pid = p
+		} else if contextPID, err := auth.GetProjectID(c); err == nil && contextPID != "" {
+			pid = contextPID
+		}
+		if pid != "" {
+			req.ProjectID = &pid
+		}
 	}
 
 	// Validate project_id if provided
@@ -174,12 +204,17 @@ func (h *Handler) Update(c echo.Context) error {
 		return apperror.ErrBadRequest.WithMessage("invalid branch id format")
 	}
 
+	projectID, err := resolveProjectID(c)
+	if err != nil {
+		return err
+	}
+
 	var req UpdateBranchRequest
 	if err := c.Bind(&req); err != nil {
 		return apperror.ErrBadRequest.WithMessage("invalid request body")
 	}
 
-	branch, err := h.svc.Update(c.Request().Context(), id, &req)
+	branch, err := h.svc.Update(c.Request().Context(), id, projectID, &req)
 	if err != nil {
 		return err
 	}
@@ -217,7 +252,12 @@ func (h *Handler) Delete(c echo.Context) error {
 		return apperror.ErrBadRequest.WithMessage("invalid branch id format")
 	}
 
-	err := h.svc.Delete(c.Request().Context(), id)
+	projectID, err := resolveProjectID(c)
+	if err != nil {
+		return err
+	}
+
+	err = h.svc.Delete(c.Request().Context(), id, projectID)
 	if err != nil {
 		return err
 	}

@@ -785,7 +785,7 @@ func (w *ObjectExtractionWorker) deleteStagingBranch(ctx context.Context, job *O
 	if w.branchService == nil || branchID == nil {
 		return
 	}
-	if err := w.branchService.Delete(ctx, branchID.String()); err != nil {
+	if err := w.branchService.Delete(ctx, branchID.String(), job.ProjectID); err != nil {
 		w.log.Warn("failed to delete staging branch after job failure",
 			slog.String("job_id", job.ID),
 			slog.String("branch_id", branchID.String()),
