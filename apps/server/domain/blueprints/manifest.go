@@ -26,21 +26,31 @@ type PackManifest struct {
 	RelationshipTypes []RelationshipTypeDef `json:"relationshipTypes,omitempty"`
 }
 
-// ObjectTypeDef is a single object type schema in a pack manifest.
+// ObjectTypeDef is a single object type schema in a pack manifest. Labels,
+// Embedding, Extraction, and UI are carried as raw maps so behavioural keys
+// (e.g. extraction.enabled:false, embedding.mode/field) survive the manifest
+// round-trip losslessly rather than being dropped by a typed struct.
 type ObjectTypeDef struct {
 	Name        string         `json:"name"`
 	Label       string         `json:"label"`
 	Description string         `json:"description"`
 	Properties  map[string]any `json:"properties"`
+	Labels      []string       `json:"labels,omitempty"`
+	Embedding   map[string]any `json:"embedding,omitempty"`
+	Extraction  map[string]any `json:"extraction,omitempty"`
+	UI          map[string]any `json:"ui,omitempty"`
 }
 
 // RelationshipTypeDef is a single relationship type schema in a pack manifest.
+// Properties carries any relationship-level sub-block (e.g. a description
+// property) as a raw map for lossless pass-through.
 type RelationshipTypeDef struct {
-	Name        string `json:"name"`
-	Label       string `json:"label"`
-	Description string `json:"description"`
-	SourceType  string `json:"sourceType"`
-	TargetType  string `json:"targetType"`
+	Name        string         `json:"name"`
+	Label       string         `json:"label"`
+	Description string         `json:"description"`
+	SourceType  string         `json:"sourceType"`
+	TargetType  string         `json:"targetType"`
+	Properties  map[string]any `json:"properties,omitempty"`
 }
 
 // AgentManifest describes an agent definition to create or update.
