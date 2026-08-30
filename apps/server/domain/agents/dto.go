@@ -587,6 +587,10 @@ func (q *AgentQuestion) ToDTO() *AgentQuestionDTO {
 // RespondToQuestionRequest is the request body for responding to an agent question.
 type RespondToQuestionRequest struct {
 	Response string `json:"response" validate:"required"`
+	// Message is an optional human-written reason attached to a tool-policy
+	// rejection. It is surfaced to the agent in the rejected result so it can
+	// adapt instead of silently dropping the direction.
+	Message string `json:"message,omitempty"`
 }
 
 // ADKEventDTO represents an event within an ADK session.

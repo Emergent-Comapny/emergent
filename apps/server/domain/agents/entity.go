@@ -322,6 +322,19 @@ type ToolPolicy struct {
 	Disabled bool `json:"disabled,omitempty"`
 }
 
+// ToolPolicyDefault is the fallback policy applied to tools with no explicit
+// ToolPolicies entry on an agent definition.
+type ToolPolicyDefault string
+
+const (
+	// ToolPolicyDefaultAllow runs tools silently (existing behavior).
+	ToolPolicyDefaultAllow ToolPolicyDefault = "allow"
+	// ToolPolicyDefaultDeny hard-blocks tools without an explicit entry.
+	ToolPolicyDefaultDeny ToolPolicyDefault = "deny"
+	// ToolPolicyDefaultAsk requires approval for tools without an explicit entry.
+	ToolPolicyDefaultAsk ToolPolicyDefault = "ask"
+)
+
 // AgentDefinition stores agent configurations from product manifests.
 // This is separate from Agent (which tracks runtime state like last_run_at).
 // Table: kb.agent_definitions
@@ -353,8 +366,29 @@ type AgentDefinition struct {
 	// ToolPolicies maps tool name → policy. When a tool has Confirm:true,
 	// the executor pauses the run and asks the user before executing the tool.
 	ToolPolicies map[string]ToolPolicy `bun:"tool_policies,type:jsonb,default:'{}'" json:"toolPolicies,omitempty"`
-	CreatedAt    time.Time             `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"createdAt"`
-	UpdatedAt    time.Time             `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updatedAt"`
+	// DefaultToolPolicy is the fallback policy for tools without an explicit
+	// ToolPolicies entry. "allow" (default) preserves existing behavior; "deny"
+	// blocks unlisted tools; "ask" requires confirmation for them.
+	DefaultToolPolicy ToolPolicyDefault `bun:"default_tool_policy,notnull,default:'allow'" json:"defaultToolPolicy,omitempty"`
+	CreatedAt         time.Time         `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"createdAt"`
+	UpdatedAt         time.Time         `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updatedAt"`
+}
+
+// effectiveToolPolicy returns the policy that governs toolName: the explicit
+// ToolPolicies entry when present, otherwise the policy derived from
+// DefaultToolPolicy. The bool is false when the effective policy is "allow".
+func (d *AgentDefinition) effectiveToolPolicy(toolName string) (ToolPolicy, bool) {
+	if p, ok := d.ToolPolicies[toolName]; ok {
+		return p, true
+	}
+	switch d.DefaultToolPolicy {
+	case ToolPolicyDefaultDeny:
+		return ToolPolicy{Disabled: true}, true
+	case ToolPolicyDefaultAsk:
+		return ToolPolicy{Confirm: true}, true
+	default:
+		return ToolPolicy{}, false
+	}
 }
 
 // AgentRunMessage stores a single LLM message exchanged during an agent run.
@@ -451,6 +485,28 @@ type AgentQuestion struct {
 	// Relations
 	Run   *AgentRun `bun:"rel:belongs-to,join:run_id=id" json:"-"`
 	Agent *Agent    `bun:"rel:belongs-to,join:agent_id=id" json:"-"`
+}
+
+// AgentToolApproval records a single human decision on a tool-policy
+// confirmation (approve / reject / cancel). It is the audit trail for
+// human-in-the-loop tool gating.
+// Table: kb.agent_tool_approvals
+type AgentToolApproval struct {
+	bun.BaseModel `bun:"table:kb.agent_tool_approvals,alias:ata"`
+
+	ID          string         `bun:"id,pk,type:uuid,default:gen_random_uuid()" json:"id"`
+	RunID       string         `bun:"run_id,type:uuid,notnull" json:"runId"`
+	ProjectID   string         `bun:"project_id,type:uuid,notnull" json:"projectId"`
+	AgentID     string         `bun:"agent_id,type:uuid,notnull" json:"agentId"`
+	QuestionID  string         `bun:"question_id,type:uuid,notnull" json:"questionId"`
+	ToolName    string         `bun:"tool_name,notnull" json:"toolName"`
+	ArgsSummary map[string]any `bun:"args_summary,type:jsonb,notnull,default:'{}'" json:"argsSummary"`
+	Decision    string         `bun:"decision,notnull,default:'pending'" json:"decision"` // pending, approved, rejected, cancelled
+	Message     string         `bun:"message,type:text" json:"message,omitempty"`
+	DecidedBy   *string        `bun:"decided_by,type:uuid" json:"decidedBy,omitempty"`
+	DecidedAt   *time.Time     `bun:"decided_at" json:"decidedAt,omitempty"`
+	CreatedAt   time.Time      `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"createdAt"`
+	UpdatedAt   time.Time      `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updatedAt"`
 }
 
 // AgentJobStatus defines the status of an agent run job in the dispatch queue.

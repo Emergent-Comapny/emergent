@@ -942,6 +942,8 @@ func (h *Handler) streamAgentChat(ctx context.Context, conv *Conversation, messa
 			sseWriter.WriteData(sse.NewMCPToolEvent(event.Tool, status, event.Output, event.Error))
 		case agents.StreamEventError:
 			sseWriter.WriteData(sse.NewErrorEvent(event.Error))
+		case agents.StreamEventToolApproval:
+			sseWriter.WriteData(sse.NewApprovalEvent(event.Tool, event.Input, event.QuestionID))
 		}
 	}
 

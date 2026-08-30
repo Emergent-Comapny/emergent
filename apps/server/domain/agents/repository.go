@@ -1955,6 +1955,48 @@ func (r *Repository) AnswerQuestion(ctx context.Context, id string, response str
 	return err
 }
 
+// CreateToolApproval inserts a pending tool-approval audit record.
+func (r *Repository) CreateToolApproval(ctx context.Context, a *AgentToolApproval) error {
+	if a.CreatedAt.IsZero() {
+		a.CreatedAt = time.Now()
+	}
+	if a.UpdatedAt.IsZero() {
+		a.UpdatedAt = time.Now()
+	}
+	_, err := r.db.NewInsert().Model(a).Exec(ctx)
+	return err
+}
+
+// UpdateToolApprovalDecision records the human decision on a tool-approval audit
+// record, keyed by question ID. Only a pending record is updated (idempotent).
+func (r *Repository) UpdateToolApprovalDecision(ctx context.Context, questionID, decision, message, decidedBy string) error {
+	now := time.Now()
+	_, err := r.db.NewUpdate().
+		Model((*AgentToolApproval)(nil)).
+		Set("decision = ?", decision).
+		Set("message = ?", message).
+		Set("decided_by = ?", decidedBy).
+		Set("decided_at = ?", now).
+		Set("updated_at = ?", now).
+		Where("question_id = ?", questionID).
+		Where("decision = ?", "pending").
+		Exec(ctx)
+	return err
+}
+
+// CancelQuestion marks a pending question as cancelled.
+func (r *Repository) CancelQuestion(ctx context.Context, id string) error {
+	now := time.Now()
+	_, err := r.db.NewUpdate().
+		Model((*AgentQuestion)(nil)).
+		Set("status = ?", QuestionStatusCancelled).
+		Set("updated_at = ?", now).
+		Where("id = ?", id).
+		Where("status = ?", QuestionStatusPending).
+		Exec(ctx)
+	return err
+}
+
 // ListQuestionsByRunID returns all questions for a run, ordered by creation time.
 func (r *Repository) ListQuestionsByRunID(ctx context.Context, runID string) ([]*AgentQuestion, error) {
 	var questions []*AgentQuestion

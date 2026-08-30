@@ -98,6 +98,7 @@ func RegisterRoutes(e *echo.Echo, h *Handler, authMiddleware *auth.Middleware) {
 	questions.Use(authMiddleware.RequireProjectScope())
 	questions.GET("", h.HandleListQuestionsByProject)
 	questions.POST("/:questionId/respond", h.HandleRespondToQuestion)
+	questions.POST("/:questionId/cancel", h.HandleCancelQuestion)
 
 	// --- Agent session status routes ---
 	sessions := e.Group("/api/v1/agent/sessions")
