@@ -3073,6 +3073,49 @@ func (h *Handler) HandleListQuestionsByProject(c echo.Context) error {
 	return c.JSON(http.StatusOK, SuccessResponse(dtos))
 }
 
+// HandleListToolApprovals handles GET /api/projects/:projectId/agent-approvals
+// @Summary      List tool-approval audit records
+// @Description  Returns tool-policy approval decisions for the project, newest first
+// @Tags         agent-questions
+// @Accept       json
+// @Produce      json
+// @Param        projectId path string true "Project ID (UUID)"
+// @Param        decision query string false "Filter by decision (pending, approved, rejected, cancelled)"
+// @Success      200 {object} APIResponse[[]AgentToolApprovalDTO] "List of approvals"
+// @Failure      400 {object} apperror.Error "Invalid request"
+// @Failure      401 {object} apperror.Error "Unauthorized"
+// @Failure      500 {object} apperror.Error "Internal server error"
+// @Router       /api/projects/{projectId}/agent-approvals [get]
+// @Security     bearerAuth
+func (h *Handler) HandleListToolApprovals(c echo.Context) error {
+	user := auth.GetUser(c)
+	if user == nil {
+		return apperror.ErrUnauthorized
+	}
+
+	projectID := c.Param("projectId")
+	if projectID == "" {
+		return apperror.NewBadRequest("projectId is required")
+	}
+
+	var decisionFilter *string
+	if d := c.QueryParam("decision"); d != "" {
+		decisionFilter = &d
+	}
+
+	approvals, err := h.repo.ListToolApprovals(c.Request().Context(), projectID, decisionFilter)
+	if err != nil {
+		return apperror.NewInternal("failed to list tool approvals", err)
+	}
+
+	approvalDTOs := make([]*AgentToolApprovalDTO, len(approvals))
+	for i, a := range approvals {
+		approvalDTOs[i] = a.ToDTO()
+	}
+
+	return c.JSON(http.StatusOK, SuccessResponse(approvalDTOs))
+}
+
 // GetADKSessions handles GET /api/projects/:projectId/adk-sessions
 func (h *Handler) GetADKSessions(c echo.Context) error {
 	projectID := c.Param("projectId")

@@ -2024,6 +2024,22 @@ func (r *Repository) ReopenQuestion(ctx context.Context, id string) error {
 	return err
 }
 
+// ListToolApprovals returns tool-approval audit records for a project, newest
+// first, optionally filtered by decision (pending, approved, rejected, cancelled).
+func (r *Repository) ListToolApprovals(ctx context.Context, projectID string, decision *string) ([]*AgentToolApproval, error) {
+	var approvals []*AgentToolApproval
+	q := r.db.NewSelect().
+		Model(&approvals).
+		Where("project_id = ?", projectID)
+	if decision != nil {
+		q = q.Where("decision = ?", *decision)
+	}
+	if err := q.Order("created_at DESC").Scan(ctx); err != nil {
+		return nil, err
+	}
+	return approvals, nil
+}
+
 // ListQuestionsByRunID returns all questions for a run, ordered by creation time.
 func (r *Repository) ListQuestionsByRunID(ctx context.Context, runID string) ([]*AgentQuestion, error) {
 	var questions []*AgentQuestion
