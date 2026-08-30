@@ -241,7 +241,127 @@ func (s *Service) recordApplication(ctx context.Context, bp *Blueprint, projectI
 		Version:     bp.Version,
 		Checksum:    bp.Checksum,
 		AppliedBy:   appliedBy,
+		Status:      "applied",
 		AppliedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	})
+}
+
+// Unapply reverses an apply for a project: it hard-deletes the blueprint's
+// agents (by name, project-scoped) and soft-removes the pack assignments
+// (leaving the global pack), then marks the application record unapplied.
+// Skills are skipped (global scope, shared across projects) and seed graph
+// objects are skipped (no per-object provenance). NOT atomic — each step is
+// idempotent (find-then-delete-by-id; already-absent counts as missing), so a
+// retry after a mid-unapply crash converges. The record is marked unapplied
+// last so GET /applied still lists it until the unapply completes.
+func (s *Service) Unapply(ctx context.Context, blueprintID, projectID string) (*UnapplyResult, error) {
+	bp, err := s.repo.GetByID(ctx, blueprintID)
+	if err != nil {
+		return nil, err
+	}
+
+	app, err := s.repo.GetApplication(ctx, projectID, blueprintID)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &UnapplyResult{
+		BlueprintID:   bp.ID,
+		BlueprintName: bp.Name,
+		Version:       bp.Version,
+		Checksum:      app.Checksum,
+		Status:        "unapplied",
+	}
+
+	if app.Status == "unapplied" {
+		result.AlreadyUnapplied = true
+		return result, nil
+	}
+
+	// Drift: applied checksum differs from the current blueprint checksum.
+	result.Drift = app.Checksum != bp.Checksum
+
+	var manifest BlueprintManifest
+	if err := json.Unmarshal(bp.Manifest, &manifest); err != nil {
+		return nil, apperror.ErrBadRequest.WithMessage("blueprint manifest is not valid JSON: " + err.Error())
+	}
+
+	// Agents: hard delete by name. Flag drift by comparing the definition's
+	// UpdatedAt against the application's AppliedAt (apply bumps UpdatedAt, so a
+	// later user edit leaves UpdatedAt > AppliedAt).
+	if s.agentRepo != nil {
+		for _, am := range manifest.Agents {
+			def, err := s.agentRepo.FindDefinitionByName(ctx, projectID, am.Name)
+			if err != nil {
+				return nil, err
+			}
+			if def == nil {
+				result.Agents.Missing++
+				continue
+			}
+			if def.UpdatedAt.After(app.AppliedAt) {
+				result.DriftedAgents = append(result.DriftedAgents, am.Name)
+			}
+			if err := s.agentRepo.DeleteDefinition(ctx, def.ID); err != nil {
+				return nil, err
+			}
+			result.Agents.Removed++
+		}
+	} else if len(manifest.Agents) > 0 {
+		result.Agents.Skipped = len(manifest.Agents)
+	}
+
+	// Packs: soft-delete this project's assignment, leave the global pack.
+	if len(manifest.Packs) > 0 {
+		installed, err := s.schemasSvc.GetInstalledPacks(ctx, projectID)
+		if err != nil {
+			return nil, err
+		}
+		assignmentBySchema := make(map[string]string, len(installed))
+		for _, it := range installed {
+			assignmentBySchema[it.SchemaID] = it.ID
+		}
+		for _, p := range manifest.Packs {
+			pack, err := s.schemasRepo.GetPackByNameVersion(ctx, p.Name, p.Version)
+			if err != nil {
+				if isNotFound(err) {
+					result.Packs.Missing++
+					continue
+				}
+				return nil, err
+			}
+			assignmentID, ok := assignmentBySchema[pack.ID]
+			if !ok {
+				result.Packs.Missing++
+				continue
+			}
+			if err := s.schemasSvc.DeleteAssignment(ctx, projectID, assignmentID); err != nil {
+				if isNotFound(err) {
+					result.Packs.Missing++
+					continue
+				}
+				return nil, err
+			}
+			result.Packs.Removed++
+		}
+	}
+
+	// Skills: skipped (global scope, shared across projects/blueprints).
+	for _, sk := range manifest.Skills {
+		result.Skills.Skipped++
+		result.SkippedSkills = append(result.SkippedSkills, sk.Name)
+	}
+
+	// Seed: skipped (no per-object provenance to attribute).
+	if manifest.Seed != nil {
+		result.Seed.Skipped = len(manifest.Seed.Objects) + len(manifest.Seed.Relationships)
+	}
+
+	// Mark the application record unapplied last (retry converges).
+	if err := s.repo.MarkUnapplied(ctx, projectID, blueprintID); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }

@@ -200,6 +200,7 @@ func (r *Repository) RecordApplication(ctx context.Context, app *BlueprintApplic
 		Set("applied_by = EXCLUDED.applied_by").
 		Set("applied_at = EXCLUDED.applied_at").
 		Set("updated_at = EXCLUDED.updated_at").
+		Set("status = EXCLUDED.status").
 		Exec(ctx)
 	if err != nil {
 		r.log.Error("failed to record blueprint application", logger.Error(err))
@@ -226,6 +227,7 @@ func (r *Repository) ListApplied(ctx context.Context, projectID string) ([]Appli
 		FROM kb.blueprint_applications bpa
 		JOIN kb.blueprints bp ON bp.id = bpa.blueprint_id
 		WHERE bpa.project_id = ?
+		  AND bpa.status = 'applied'
 		ORDER BY bp.name ASC
 	`, projectID).Scan(ctx, &results)
 	if err != nil {
@@ -246,4 +248,44 @@ func (r *Repository) ListApplied(ctx context.Context, projectID string) ([]Appli
 		}
 	}
 	return out, nil
+}
+
+// GetApplication returns the application record for a blueprint+project, or
+// ErrNotFound when the blueprint has not been applied to the project.
+func (r *Repository) GetApplication(ctx context.Context, projectID, blueprintID string) (*BlueprintApplication, error) {
+	var app BlueprintApplication
+	err := r.db.NewSelect().
+		Model(&app).
+		Where("project_id = ?", projectID).
+		Where("blueprint_id = ?", blueprintID).
+		Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, apperror.ErrNotFound.WithMessage("blueprint not applied to this project")
+		}
+		r.log.Error("failed to get blueprint application", logger.Error(err))
+		return nil, apperror.ErrDatabase.WithInternal(err)
+	}
+	return &app, nil
+}
+
+// MarkUnapplied flips an application record to status 'unapplied'. Called last
+// in Unapply so a mid-unapply crash leaves the record 'applied' and retryable.
+func (r *Repository) MarkUnapplied(ctx context.Context, projectID, blueprintID string) error {
+	result, err := r.db.NewUpdate().
+		Model((*BlueprintApplication)(nil)).
+		Where("project_id = ?", projectID).
+		Where("blueprint_id = ?", blueprintID).
+		Set("status = ?", "unapplied").
+		Set("updated_at = ?", time.Now()).
+		Exec(ctx)
+	if err != nil {
+		r.log.Error("failed to mark blueprint application unapplied", logger.Error(err))
+		return apperror.ErrDatabase.WithInternal(err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return apperror.ErrNotFound.WithMessage("blueprint application not found")
+	}
+	return nil
 }

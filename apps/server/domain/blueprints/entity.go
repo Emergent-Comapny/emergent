@@ -86,3 +86,29 @@ type AppliedBlueprint struct {
 	Checksum    string    `json:"checksum"`
 	AppliedAt   time.Time `json:"appliedAt"`
 }
+
+// UnapplyCounts reports per-entity-type reversal counts for one blueprint
+// unapply. Missing counts entities that were already absent (idempotent);
+// Skipped counts entities intentionally not reversed.
+type UnapplyCounts struct {
+	Removed int `json:"removed"`
+	Missing int `json:"missing"`
+	Skipped int `json:"skipped"`
+}
+
+// UnapplyResult is the response from Unapply.
+type UnapplyResult struct {
+	BlueprintID      string        `json:"blueprintId"`
+	BlueprintName    string        `json:"blueprintName"`
+	Version          string        `json:"version"`
+	Checksum         string        `json:"checksum"`         // stored (applied) checksum
+	Drift            bool          `json:"drift"`            // applied checksum != current blueprint checksum
+	AlreadyUnapplied bool          `json:"alreadyUnapplied"` // idempotent short-circuit
+	DriftedAgents    []string      `json:"driftedAgents,omitempty"`
+	Packs            UnapplyCounts `json:"packs"`
+	Agents           UnapplyCounts `json:"agents"`
+	Skills           UnapplyCounts `json:"skills"`
+	SkippedSkills    []string      `json:"skippedSkills,omitempty"`
+	Seed             UnapplyCounts `json:"seed"`
+	Status           string        `json:"status"`
+}
