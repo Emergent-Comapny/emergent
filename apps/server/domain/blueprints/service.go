@@ -221,3 +221,27 @@ func (s *Service) DeleteBlueprint(ctx context.Context, id string) error {
 	}
 	return s.repo.Delete(ctx, id)
 }
+
+// ListApplied returns the blueprints applied to a project.
+func (s *Service) ListApplied(ctx context.Context, projectID string) ([]AppliedBlueprint, error) {
+	return s.repo.ListApplied(ctx, projectID)
+}
+
+// recordApplication upserts the project's application record for a blueprint.
+// It is the provenance write behind future drift detection and unapply; called
+// only after a fully successful apply (packs/agents/skills/seed).
+func (s *Service) recordApplication(ctx context.Context, bp *Blueprint, projectID, userID string) error {
+	var appliedBy *string
+	if userID != "" {
+		appliedBy = &userID
+	}
+	return s.repo.RecordApplication(ctx, &BlueprintApplication{
+		BlueprintID: bp.ID,
+		ProjectID:   projectID,
+		Version:     bp.Version,
+		Checksum:    bp.Checksum,
+		AppliedBy:   appliedBy,
+		AppliedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	})
+}

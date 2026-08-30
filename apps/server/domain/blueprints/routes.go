@@ -14,6 +14,7 @@ func RegisterRoutes(e *echo.Echo, h *Handler, authMiddleware *auth.Middleware) {
 
 	// Static sub-paths must be registered before /:id so they are not swallowed.
 	g.GET("/name/:name/versions", h.ListVersionsByName)
+	g.GET("/applied", h.ListAppliedBlueprints, authMiddleware.RequireProjectID())
 
 	g.POST("", h.CreateBlueprint)
 	g.GET("", h.ListBlueprints)

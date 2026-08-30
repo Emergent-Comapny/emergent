@@ -108,6 +108,13 @@ func (s *Service) Apply(ctx context.Context, blueprintID, projectID, userID stri
 	// Seed: idempotent object upserts then relationships (best-effort, non-fatal).
 	result.Seed = s.applySeed(ctx, projectUUID, actorID, manifest.Seed)
 
+	// Record the application (provenance) only after all materialization steps
+	// succeeded. A partial apply that errors out returns before this, so it is
+	// never recorded; a retry converges and then records.
+	if err := s.recordApplication(ctx, bp, projectID, userID); err != nil {
+		return nil, err
+	}
+
 	return result, nil
 }
 

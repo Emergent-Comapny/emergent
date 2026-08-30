@@ -363,3 +363,33 @@ func (h *Handler) ListVersionsByName(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, blueprints)
 }
+
+// ListAppliedBlueprints handles GET /api/blueprints/applied.
+// @Summary      List applied blueprints
+// @Description  Returns the blueprints applied to the caller's project, joined with blueprint metadata and the last-applied manifest checksum
+// @Tags         blueprints
+// @Produce      json
+// @Success      200 {array} AppliedBlueprint "Applied blueprints"
+// @Failure      400 {object} apperror.Error "Project context required"
+// @Failure      401 {object} apperror.Error "Unauthorized"
+// @Failure      500 {object} apperror.Error "Internal server error"
+// @Router       /api/blueprints/applied [get]
+// @Security     bearerAuth
+func (h *Handler) ListAppliedBlueprints(c echo.Context) error {
+	user := auth.GetUser(c)
+	if user == nil {
+		return apperror.ErrUnauthorized
+	}
+
+	projectID := user.ProjectID
+	if projectID == "" {
+		return apperror.ErrBadRequest.WithMessage("project context required (X-Project-ID header or API token)")
+	}
+
+	out, err := h.svc.ListApplied(c.Request().Context(), projectID)
+	if err != nil {
+		return err
+	}
+
+	return c.JSON(http.StatusOK, out)
+}

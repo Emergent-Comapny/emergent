@@ -188,3 +188,62 @@ func (r *Repository) ExistsByNameVersion(ctx context.Context, name, version stri
 	}
 	return exists, nil
 }
+
+// RecordApplication upserts a blueprint application keyed by
+// (project_id, blueprint_id). A re-apply updates the existing row in place.
+func (r *Repository) RecordApplication(ctx context.Context, app *BlueprintApplication) error {
+	_, err := r.db.NewInsert().
+		Model(app).
+		On("CONFLICT (project_id, blueprint_id) DO UPDATE").
+		Set("version = EXCLUDED.version").
+		Set("checksum = EXCLUDED.checksum").
+		Set("applied_by = EXCLUDED.applied_by").
+		Set("applied_at = EXCLUDED.applied_at").
+		Set("updated_at = EXCLUDED.updated_at").
+		Exec(ctx)
+	if err != nil {
+		r.log.Error("failed to record blueprint application", logger.Error(err))
+		return apperror.ErrDatabase.WithInternal(err)
+	}
+	return nil
+}
+
+// ListApplied returns the blueprints applied to a project, joined with their
+// blueprint metadata, ordered by name.
+func (r *Repository) ListApplied(ctx context.Context, projectID string) ([]AppliedBlueprint, error) {
+	var results []struct {
+		BlueprintID string    `bun:"blueprint_id"`
+		Name        string    `bun:"name"`
+		Version     string    `bun:"version"`
+		Description string    `bun:"description"`
+		Author      string    `bun:"author"`
+		Checksum    string    `bun:"checksum"`
+		AppliedAt   time.Time `bun:"applied_at"`
+	}
+	err := r.db.NewRaw(`
+		SELECT bpa.blueprint_id, bp.name, bpa.version, bp.description, bp.author,
+		       bpa.checksum, bpa.applied_at
+		FROM kb.blueprint_applications bpa
+		JOIN kb.blueprints bp ON bp.id = bpa.blueprint_id
+		WHERE bpa.project_id = ?
+		ORDER BY bp.name ASC
+	`, projectID).Scan(ctx, &results)
+	if err != nil {
+		r.log.Error("failed to list applied blueprints", logger.Error(err))
+		return nil, apperror.ErrDatabase.WithInternal(err)
+	}
+
+	out := make([]AppliedBlueprint, len(results))
+	for i, res := range results {
+		out[i] = AppliedBlueprint{
+			BlueprintID: res.BlueprintID,
+			Name:        res.Name,
+			Version:     res.Version,
+			Description: res.Description,
+			Author:      res.Author,
+			Checksum:    res.Checksum,
+			AppliedAt:   res.AppliedAt,
+		}
+	}
+	return out, nil
+}
