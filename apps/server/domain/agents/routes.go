@@ -100,6 +100,12 @@ func RegisterRoutes(e *echo.Echo, h *Handler, authMiddleware *auth.Middleware) {
 	questions.POST("/:questionId/respond", h.HandleRespondToQuestion)
 	questions.POST("/:questionId/cancel", h.HandleCancelQuestion)
 
+	// --- Project-scoped tool-approval audit routes ---
+	approvals := e.Group("/api/projects/:projectId/agent-approvals")
+	approvals.Use(authMiddleware.RequireAuth())
+	approvals.Use(authMiddleware.RequireProjectScope())
+	approvals.GET("", h.HandleListToolApprovals)
+
 	// --- Agent session status routes ---
 	sessions := e.Group("/api/v1/agent/sessions")
 	sessions.Use(authMiddleware.RequireAuth())
