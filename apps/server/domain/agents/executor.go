@@ -46,6 +46,10 @@ const (
 	StreamEventToolCallEnd
 	// StreamEventError is emitted when an error occurs during execution.
 	StreamEventError
+	// StreamEventThinking is emitted for the agent's reasoning/planning text
+	// (non-final assistant text) so callers can surface it separately from the
+	// final answer.
+	StreamEventThinking
 )
 
 // StreamEvent is a single event emitted during agent execution via StreamCallback.
@@ -56,11 +60,29 @@ type StreamEvent struct {
 	Input  map[string]any // For ToolCallStart: the tool arguments
 	Output map[string]any // For ToolCallEnd: the tool result
 	Error  string         // For Error/ToolCallEnd: error message
+	Role   string         // For Thinking: "operator" (planning text) or "reasoning" (chain-of-thought)
 }
 
 // StreamCallback is an optional function invoked for each streaming event during execution.
 // When set on ExecuteRequest, it enables real-time streaming of text tokens and tool calls.
 type StreamCallback func(event StreamEvent)
+
+// thinkingTexts splits an assistant event's parts into the planning text
+// (non-Thought parts — the pre-tool monologue) and the reasoning text (Thought
+// parts — the model's chain-of-thought). Nil and empty parts are skipped.
+func thinkingTexts(parts []*genai.Part) (operator, reasoning []string) {
+	for _, part := range parts {
+		if part == nil || part.Text == "" {
+			continue
+		}
+		if part.Thought {
+			reasoning = append(reasoning, part.Text)
+		} else {
+			operator = append(operator, part.Text)
+		}
+	}
+	return operator, reasoning
+}
 
 // ModelLimitsLookup is a narrow interface for querying model token limits
 // from the provider catalog. It is satisfied by *provider.Repository but
@@ -2312,6 +2334,28 @@ func (ae *AgentExecutor) runPipeline(
 			// Persist assistant messages from events
 			if event.Content != nil && !event.Partial {
 				ae.persistEventContent(dbCtx, run.ID, event, tracker.current())
+			}
+
+			// Stream the agent's reasoning/planning text (non-final assistant
+			// text) as thinking events so callers can surface it separately from
+			// the final answer. Thought parts → "reasoning"; regular text (the
+			// pre-tool planning monologue) → "operator".
+			if event.Content != nil && !event.Partial && !event.IsFinalResponse() && req.StreamCallback != nil {
+				operatorText, reasoningText := thinkingTexts(event.Content.Parts)
+				if len(operatorText) > 0 {
+					req.StreamCallback(StreamEvent{
+						Type: StreamEventThinking,
+						Role: "operator",
+						Text: strings.Join(operatorText, "\n"),
+					})
+				}
+				if len(reasoningText) > 0 {
+					req.StreamCallback(StreamEvent{
+						Type: StreamEventThinking,
+						Role: "reasoning",
+						Text: strings.Join(reasoningText, "\n"),
+					})
+				}
 			}
 
 			if event.IsFinalResponse() {

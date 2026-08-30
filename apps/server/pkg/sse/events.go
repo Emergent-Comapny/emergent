@@ -10,6 +10,10 @@ const (
 	// EventToken is emitted for each streamed text token.
 	EventToken ChatEventType = "token"
 
+	// EventThinking is emitted for the agent's reasoning/planning text, so
+	// clients can surface it separately from the final answer.
+	EventThinking ChatEventType = "thinking"
+
 	// EventMCPTool is emitted for MCP tool invocations.
 	EventMCPTool ChatEventType = "mcp_tool"
 
@@ -60,6 +64,29 @@ func NewTokenEvent(token string) TokenEvent {
 	return TokenEvent{
 		Type:  string(EventToken),
 		Token: token,
+	}
+}
+
+// ThinkingEvent is emitted for the agent's reasoning/planning text, so clients
+// can surface it separately from the final answer.
+type ThinkingEvent struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+	Role string `json:"role"` // "operator" (planning) or "reasoning" (chain-of-thought)
+	Text string `json:"text"`
+	Done bool   `json:"done"`
+}
+
+// NewThinkingEvent creates a new thinking event. id is a stable identifier for
+// the reasoning segment so clients can group incremental deltas; role selects
+// "operator" (planning) or "reasoning" (chain-of-thought).
+func NewThinkingEvent(id, role, text string) ThinkingEvent {
+	return ThinkingEvent{
+		Type: string(EventThinking),
+		ID:   id,
+		Role: role,
+		Text: text,
+		Done: true,
 	}
 }
 
