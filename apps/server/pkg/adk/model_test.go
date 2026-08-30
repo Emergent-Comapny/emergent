@@ -444,3 +444,23 @@ func TestModelFactoryCreateModel_FallsBackToProviderConfig(t *testing.T) {
 		t.Fatal("CreateModel() returned nil model")
 	}
 }
+
+func TestIsReasonerModel(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want bool
+	}{
+		{"deepseek-v4-flash", true},
+		{"deepseek-v4-pro", true},        // was previously missed — v4-pro rejects tool_choice too
+		{"openai/deepseek-v4-pro", true}, // provider-prefixed form
+		{"deepseek-reasoner", true},
+		{"kvasir", true},
+		{"deepseek-chat", false}, // v3, non-reasoner — supports tool_choice
+		{"openai/gpt-4o", false},
+		{"google/gemini-2.5-flash", false},
+	} {
+		if got := isReasonerModel(tc.name); got != tc.want {
+			t.Errorf("isReasonerModel(%q) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
