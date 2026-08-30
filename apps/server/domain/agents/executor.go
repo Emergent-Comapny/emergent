@@ -2319,10 +2319,22 @@ func (ae *AgentExecutor) runPipeline(
 				}, nil
 			}
 
-			// Stream partial text deltas to the callback
+			// Stream partial text deltas to the callback. Thought (reasoning) parts
+			// are emitted as thinking events rather than answer tokens, so a
+			// provider that streams chain-of-thought incrementally never leaks
+			// reasoning into the final answer stream.
 			if event.Partial && event.Content != nil && req.StreamCallback != nil {
 				for _, part := range event.Content.Parts {
-					if part != nil && part.Text != "" {
+					if part == nil || part.Text == "" {
+						continue
+					}
+					if part.Thought {
+						req.StreamCallback(StreamEvent{
+							Type: StreamEventThinking,
+							Role: "reasoning",
+							Text: part.Text,
+						})
+					} else {
 						req.StreamCallback(StreamEvent{
 							Type: StreamEventTextDelta,
 							Text: part.Text,
@@ -2360,12 +2372,22 @@ func (ae *AgentExecutor) runPipeline(
 
 			if event.IsFinalResponse() {
 				lastEvent = event
-				// Emit final text response to the stream callback so callers receive
-				// token events for the agent's answer. Thought/reasoning parts are
-				// skipped — only the actual response text is streamed.
+				// Emit the final answer as token events. Thought (reasoning) parts
+				// are surfaced as thinking events rather than dropped, so a reasoner
+				// that returns chain-of-thought alongside its final answer is not
+				// silently stripped.
 				if event.Content != nil && req.StreamCallback != nil {
 					for _, part := range event.Content.Parts {
-						if part != nil && part.Text != "" && !part.Thought {
+						if part == nil || part.Text == "" {
+							continue
+						}
+						if part.Thought {
+							req.StreamCallback(StreamEvent{
+								Type: StreamEventThinking,
+								Role: "reasoning",
+								Text: part.Text,
+							})
+						} else {
 							req.StreamCallback(StreamEvent{
 								Type: StreamEventTextDelta,
 								Text: part.Text,
