@@ -20,13 +20,13 @@ type ProjectManifest struct {
 
 // PackManifest describes a schema pack to create and assign.
 type PackManifest struct {
-	Name              string                       `json:"name"`
-	Version           string                       `json:"version"`
-	Description       string                       `json:"description"`
-	Author            string                       `json:"author"`
+	Name              string                        `json:"name"`
+	Version           string                        `json:"version"`
+	Description       string                        `json:"description"`
+	Author            string                        `json:"author"`
 	Migrations        *schemas.SchemaMigrationHints `json:"migrations,omitempty"`
-	ObjectTypes       []ObjectTypeDef              `json:"objectTypes,omitempty"`
-	RelationshipTypes []RelationshipTypeDef        `json:"relationshipTypes,omitempty"`
+	ObjectTypes       []ObjectTypeDef               `json:"objectTypes,omitempty"`
+	RelationshipTypes []RelationshipTypeDef         `json:"relationshipTypes,omitempty"`
 }
 
 // ObjectTypeDef is a single object type schema in a pack manifest. Labels,
