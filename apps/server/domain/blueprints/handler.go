@@ -393,3 +393,41 @@ func (h *Handler) ListAppliedBlueprints(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, out)
 }
+
+// UnapplyBlueprint handles POST /api/blueprints/:id/unapply.
+// @Summary      Unapply blueprint
+// @Description  Reverses a blueprint's apply for the caller's project: deletes its agents, soft-removes its pack assignments, and marks the application unapplied. Skills and seed objects are skipped (global/shared and unattributed respectively).
+// @Tags         blueprints
+// @Produce      json
+// @Param        id path string true "Blueprint ID (UUID)"
+// @Success      200 {object} UnapplyResult "Unapply result"
+// @Failure      400 {object} apperror.Error "Bad request / project context required"
+// @Failure      401 {object} apperror.Error "Unauthorized"
+// @Failure      404 {object} apperror.Error "Blueprint not found"
+// @Failure      409 {object} apperror.Error "Blueprint not applied to this project"
+// @Failure      500 {object} apperror.Error "Internal server error"
+// @Router       /api/blueprints/{id}/unapply [post]
+// @Security     bearerAuth
+func (h *Handler) UnapplyBlueprint(c echo.Context) error {
+	user := auth.GetUser(c)
+	if user == nil {
+		return apperror.ErrUnauthorized
+	}
+
+	id := c.Param("id")
+	if id == "" {
+		return apperror.ErrBadRequest.WithMessage("id is required")
+	}
+
+	projectID := user.ProjectID
+	if projectID == "" {
+		return apperror.ErrBadRequest.WithMessage("project context required (X-Project-ID header or API token)")
+	}
+
+	result, err := h.svc.Unapply(c.Request().Context(), id, projectID)
+	if err != nil {
+		return err
+	}
+
+	return c.JSON(http.StatusOK, result)
+}

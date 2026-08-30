@@ -241,7 +241,133 @@ func (s *Service) recordApplication(ctx context.Context, bp *Blueprint, projectI
 		Version:     bp.Version,
 		Checksum:    bp.Checksum,
 		AppliedBy:   appliedBy,
+		Status:      "applied",
 		AppliedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	})
+}
+
+// Unapply reverses an apply for a project: it hard-deletes the blueprint's
+// agents (by name, project-scoped) and soft-removes the pack assignments
+// (leaving the global pack), then marks the application record unapplied.
+// Skills are skipped (global scope, shared across projects) and seed graph
+// objects are skipped (no per-object provenance). NOT atomic — each step is
+// idempotent (find-then-delete-by-id; already-absent counts as missing), so a
+// retry after a mid-unapply crash converges. The record is marked unapplied
+// last so GET /applied still lists it until the unapply completes.
+func (s *Service) Unapply(ctx context.Context, blueprintID, projectID string) (*UnapplyResult, error) {
+	bp, err := s.repo.GetByID(ctx, blueprintID)
+	if err != nil {
+		return nil, err
+	}
+
+	app, err := s.repo.GetApplication(ctx, projectID, blueprintID)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &UnapplyResult{
+		BlueprintID:   bp.ID,
+		BlueprintName: bp.Name,
+		Version:       bp.Version,
+		Checksum:      app.Checksum,
+		Status:        "unapplied",
+	}
+
+	if app.Status == "unapplied" {
+		result.AlreadyUnapplied = true
+		return result, nil
+	}
+
+	// Drift: applied checksum differs from the current blueprint checksum.
+	result.Drift = app.Checksum != bp.Checksum
+
+	var manifest BlueprintManifest
+	if err := json.Unmarshal(bp.Manifest, &manifest); err != nil {
+		return nil, apperror.ErrBadRequest.WithMessage("blueprint manifest is not valid JSON: " + err.Error())
+	}
+
+	// Agents: delete only definitions this blueprint created (source_blueprint_id
+	// == this blueprint). Pre-existing/manual (nil) and other-blueprint-owned
+	// definitions are skipped. Flag drift on owned definitions edited after apply.
+	if s.agentRepo != nil {
+		for _, am := range manifest.Agents {
+			def, err := s.agentRepo.FindDefinitionByName(ctx, projectID, am.Name)
+			if err != nil {
+				return nil, err
+			}
+			if def == nil {
+				result.Agents.Missing++
+				continue
+			}
+			if def.SourceBlueprintID == nil || *def.SourceBlueprintID != blueprintID {
+				result.Agents.Skipped++
+				continue
+			}
+			if def.UpdatedAt.After(app.AppliedAt) {
+				result.DriftedAgents = append(result.DriftedAgents, am.Name)
+			}
+			if err := s.agentRepo.DeleteDefinition(ctx, def.ID); err != nil {
+				return nil, err
+			}
+			result.Agents.Removed++
+		}
+	} else if len(manifest.Agents) > 0 {
+		result.Agents.Skipped = len(manifest.Agents)
+	}
+
+	// Packs: remove only assignments this blueprint owns and that no other
+	// applied blueprint still claims. Shared and manual assignments are skipped.
+	if len(manifest.Packs) > 0 {
+		for _, p := range manifest.Packs {
+			pack, err := s.schemasRepo.GetPackByNameVersion(ctx, p.Name, p.Version)
+			if err != nil {
+				if isNotFound(err) {
+					result.Packs.Missing++
+					continue
+				}
+				return nil, err
+			}
+			// Release this blueprint's claim first (idempotent).
+			if err := s.repo.DeletePackClaim(ctx, projectID, blueprintID, pack.ID); err != nil {
+				return nil, err
+			}
+			assignment, err := s.schemasRepo.GetActiveAssignment(ctx, projectID, pack.ID)
+			if err != nil {
+				return nil, err
+			}
+			if assignment == nil {
+				result.Packs.Missing++
+				continue
+			}
+			removed, err := s.schemasRepo.DeleteAssignmentIfOwned(ctx, projectID, pack.ID, blueprintID)
+			if err != nil {
+				return nil, err
+			}
+			if removed {
+				result.Packs.Removed++
+			} else {
+				result.Packs.Skipped++
+			}
+		}
+	}
+
+	// Skills: skipped (global scope, shared across projects/blueprints).
+	for _, sk := range manifest.Skills {
+		result.Skills.Skipped++
+		result.SkippedSkills = append(result.SkippedSkills, sk.Name)
+	}
+
+	// Seed: skipped (no per-object provenance to attribute).
+	if manifest.Seed != nil {
+		result.Seed.Skipped = len(manifest.Seed.Objects) + len(manifest.Seed.Relationships)
+	}
+
+	// Mark the application record unapplied last (retry converges). The
+	// applied_at guard detects a concurrent re-apply and returns conflict.
+	if err := s.repo.MarkUnapplied(ctx, projectID, blueprintID, app.AppliedAt); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }

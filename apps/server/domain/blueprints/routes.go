@@ -26,5 +26,6 @@ func RegisterRoutes(e *echo.Echo, h *Handler, authMiddleware *auth.Middleware) {
 	// Apply is project-scoped: RequireProjectID enforces the X-Project-ID
 	// header which populates user.ProjectID (the target project).
 	g.POST("/:id/apply", h.ApplyBlueprint, authMiddleware.RequireProjectID())
+	g.POST("/:id/unapply", h.UnapplyBlueprint, authMiddleware.RequireProjectID())
 	g.DELETE("/:id", h.DeleteBlueprint)
 }
