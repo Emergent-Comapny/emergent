@@ -188,3 +188,138 @@ func (r *Repository) ExistsByNameVersion(ctx context.Context, name, version stri
 	}
 	return exists, nil
 }
+
+// RecordApplication upserts a blueprint application keyed by
+// (project_id, blueprint_id). A re-apply updates the existing row in place.
+func (r *Repository) RecordApplication(ctx context.Context, app *BlueprintApplication) error {
+	_, err := r.db.NewInsert().
+		Model(app).
+		On("CONFLICT (project_id, blueprint_id) DO UPDATE").
+		Set("version = EXCLUDED.version").
+		Set("checksum = EXCLUDED.checksum").
+		Set("applied_by = EXCLUDED.applied_by").
+		Set("applied_at = EXCLUDED.applied_at").
+		Set("updated_at = EXCLUDED.updated_at").
+		Set("status = EXCLUDED.status").
+		Exec(ctx)
+	if err != nil {
+		r.log.Error("failed to record blueprint application", logger.Error(err))
+		return apperror.ErrDatabase.WithInternal(err)
+	}
+	return nil
+}
+
+// ListApplied returns the blueprints applied to a project, joined with their
+// blueprint metadata, ordered by name.
+func (r *Repository) ListApplied(ctx context.Context, projectID string) ([]AppliedBlueprint, error) {
+	var results []struct {
+		BlueprintID string    `bun:"blueprint_id"`
+		Name        string    `bun:"name"`
+		Version     string    `bun:"version"`
+		Description string    `bun:"description"`
+		Author      string    `bun:"author"`
+		Checksum    string    `bun:"checksum"`
+		AppliedAt   time.Time `bun:"applied_at"`
+	}
+	err := r.db.NewRaw(`
+		SELECT bpa.blueprint_id, bp.name, bpa.version, bp.description, bp.author,
+		       bpa.checksum, bpa.applied_at
+		FROM kb.blueprint_applications bpa
+		JOIN kb.blueprints bp ON bp.id = bpa.blueprint_id
+		WHERE bpa.project_id = ?
+		  AND bpa.status = 'applied'
+		ORDER BY bp.name ASC
+	`, projectID).Scan(ctx, &results)
+	if err != nil {
+		r.log.Error("failed to list applied blueprints", logger.Error(err))
+		return nil, apperror.ErrDatabase.WithInternal(err)
+	}
+
+	out := make([]AppliedBlueprint, len(results))
+	for i, res := range results {
+		out[i] = AppliedBlueprint{
+			BlueprintID: res.BlueprintID,
+			Name:        res.Name,
+			Version:     res.Version,
+			Description: res.Description,
+			Author:      res.Author,
+			Checksum:    res.Checksum,
+			AppliedAt:   res.AppliedAt,
+		}
+	}
+	return out, nil
+}
+
+// GetApplication returns the application record for a blueprint+project, or
+// ErrNotFound when the blueprint has not been applied to the project.
+func (r *Repository) GetApplication(ctx context.Context, projectID, blueprintID string) (*BlueprintApplication, error) {
+	var app BlueprintApplication
+	err := r.db.NewSelect().
+		Model(&app).
+		Where("project_id = ?", projectID).
+		Where("blueprint_id = ?", blueprintID).
+		Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, apperror.ErrNotFound.WithMessage("blueprint not applied to this project")
+		}
+		r.log.Error("failed to get blueprint application", logger.Error(err))
+		return nil, apperror.ErrDatabase.WithInternal(err)
+	}
+	return &app, nil
+}
+
+// MarkUnapplied flips an application record to status 'unapplied'. Called last
+// in Unapply so a mid-unapply crash leaves the record 'applied' and retryable.
+// The applied_at guard prevents a stale unapply from overwriting a concurrent
+// re-apply (which bumps applied_at).
+func (r *Repository) MarkUnapplied(ctx context.Context, projectID, blueprintID string, appliedAt time.Time) error {
+	result, err := r.db.NewUpdate().
+		Model((*BlueprintApplication)(nil)).
+		Where("project_id = ?", projectID).
+		Where("blueprint_id = ?", blueprintID).
+		Where("status = ?", "applied").
+		Where("applied_at = ?", appliedAt).
+		Set("status = ?", "unapplied").
+		Set("updated_at = ?", time.Now()).
+		Exec(ctx)
+	if err != nil {
+		r.log.Error("failed to mark blueprint application unapplied", logger.Error(err))
+		return apperror.ErrDatabase.WithInternal(err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return apperror.ErrConflict.WithMessage("blueprint application changed concurrently; retry unapply")
+	}
+	return nil
+}
+
+// AddPackClaim records that a blueprint's apply depends on a schema pack for a
+// project. Idempotent (INSERT ... ON CONFLICT DO NOTHING) so re-applies and
+// retries converge.
+func (r *Repository) AddPackClaim(ctx context.Context, blueprintID, projectID, schemaID string) error {
+	_, err := r.db.NewInsert().
+		Model(&BlueprintPackClaim{BlueprintID: blueprintID, ProjectID: projectID, SchemaID: schemaID}).
+		On("CONFLICT (project_id, blueprint_id, schema_id) DO NOTHING").
+		Exec(ctx)
+	if err != nil {
+		r.log.Error("failed to add pack claim", logger.Error(err))
+		return apperror.ErrDatabase.WithInternal(err)
+	}
+	return nil
+}
+
+// DeletePackClaim removes a blueprint's pack claim for a project. Idempotent.
+func (r *Repository) DeletePackClaim(ctx context.Context, projectID, blueprintID, schemaID string) error {
+	_, err := r.db.NewDelete().
+		Model((*BlueprintPackClaim)(nil)).
+		Where("project_id = ?", projectID).
+		Where("blueprint_id = ?", blueprintID).
+		Where("schema_id = ?", schemaID).
+		Exec(ctx)
+	if err != nil {
+		r.log.Error("failed to delete pack claim", logger.Error(err))
+		return apperror.ErrDatabase.WithInternal(err)
+	}
+	return nil
+}

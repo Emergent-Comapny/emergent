@@ -15,7 +15,7 @@ import (
 
 func TestDefaultWarmPoolConfig(t *testing.T) {
 	cfg := DefaultWarmPoolConfig()
-	assert.Equal(t, 0, cfg.Size)
+	assert.Equal(t, defaultWarmPoolSize, cfg.Size)
 }
 
 func TestWarmPool_IsEnabled(t *testing.T) {

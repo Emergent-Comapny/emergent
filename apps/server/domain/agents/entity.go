@@ -370,8 +370,12 @@ type AgentDefinition struct {
 	// ToolPolicies entry. "allow" (default) preserves existing behavior; "deny"
 	// blocks unlisted tools; "ask" requires confirmation for them.
 	DefaultToolPolicy ToolPolicyDefault `bun:"default_tool_policy,notnull,default:'allow'" json:"defaultToolPolicy,omitempty"`
-	CreatedAt         time.Time         `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"createdAt"`
-	UpdatedAt         time.Time         `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updatedAt"`
+	// SourceBlueprintID is the ID of the blueprint that created this definition
+	// (NULL for manual/pre-existing definitions). Unapply uses it to delete only
+	// agents the blueprint actually created.
+	SourceBlueprintID *string   `bun:"source_blueprint_id,type:uuid" json:"sourceBlueprintId,omitempty"`
+	CreatedAt         time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"createdAt"`
+	UpdatedAt         time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updatedAt"`
 }
 
 // effectiveToolPolicy returns the policy that governs toolName: the explicit

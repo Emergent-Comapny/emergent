@@ -49,6 +49,10 @@ const (
 	// StreamEventToolApproval is emitted when a tool-policy confirmation gate
 	// intercepts a tool call and pauses the run awaiting user approval.
 	StreamEventToolApproval
+	// StreamEventThinking is emitted for the agent's reasoning/planning text
+	// (non-final assistant text) so callers can surface it separately from the
+	// final answer.
+	StreamEventThinking
 )
 
 // StreamEvent is a single event emitted during agent execution via StreamCallback.
@@ -60,6 +64,7 @@ type StreamEvent struct {
 	Output     map[string]any // For ToolCallEnd: the tool result
 	Error      string         // For Error/ToolCallEnd: error message
 	QuestionID string         // For ToolApproval: the confirmation question ID
+	Role       string         // For Thinking: "operator" (planning text) or "reasoning" (chain-of-thought)
 }
 
 // StreamCallback is an optional function invoked for each streaming event during execution.
@@ -98,6 +103,23 @@ func typeHint(v any) string {
 	default:
 		return "unknown"
 	}
+}
+
+// thinkingTexts splits an assistant event's parts into the planning text
+// (non-Thought parts — the pre-tool monologue) and the reasoning text (Thought
+// parts — the model's chain-of-thought). Nil and empty parts are skipped.
+func thinkingTexts(parts []*genai.Part) (operator, reasoning []string) {
+	for _, part := range parts {
+		if part == nil || part.Text == "" {
+			continue
+		}
+		if part.Thought {
+			reasoning = append(reasoning, part.Text)
+		} else {
+			operator = append(operator, part.Text)
+		}
+	}
+	return operator, reasoning
 }
 
 // ModelLimitsLookup is a narrow interface for querying model token limits
@@ -2376,10 +2398,22 @@ func (ae *AgentExecutor) runPipeline(
 				}, nil
 			}
 
-			// Stream partial text deltas to the callback
+			// Stream partial text deltas to the callback. Thought (reasoning) parts
+			// are emitted as thinking events rather than answer tokens, so a
+			// provider that streams chain-of-thought incrementally never leaks
+			// reasoning into the final answer stream.
 			if event.Partial && event.Content != nil && req.StreamCallback != nil {
 				for _, part := range event.Content.Parts {
-					if part != nil && part.Text != "" {
+					if part == nil || part.Text == "" {
+						continue
+					}
+					if part.Thought {
+						req.StreamCallback(StreamEvent{
+							Type: StreamEventThinking,
+							Role: "reasoning",
+							Text: part.Text,
+						})
+					} else {
 						req.StreamCallback(StreamEvent{
 							Type: StreamEventTextDelta,
 							Text: part.Text,
@@ -2393,14 +2427,46 @@ func (ae *AgentExecutor) runPipeline(
 				ae.persistEventContent(dbCtx, run.ID, event, tracker.current())
 			}
 
+			// Stream the agent's reasoning/planning text (non-final assistant
+			// text) as thinking events so callers can surface it separately from
+			// the final answer. Thought parts → "reasoning"; regular text (the
+			// pre-tool planning monologue) → "operator".
+			if event.Content != nil && !event.Partial && !event.IsFinalResponse() && req.StreamCallback != nil {
+				operatorText, reasoningText := thinkingTexts(event.Content.Parts)
+				if len(operatorText) > 0 {
+					req.StreamCallback(StreamEvent{
+						Type: StreamEventThinking,
+						Role: "operator",
+						Text: strings.Join(operatorText, "\n"),
+					})
+				}
+				if len(reasoningText) > 0 {
+					req.StreamCallback(StreamEvent{
+						Type: StreamEventThinking,
+						Role: "reasoning",
+						Text: strings.Join(reasoningText, "\n"),
+					})
+				}
+			}
+
 			if event.IsFinalResponse() {
 				lastEvent = event
-				// Emit final text response to the stream callback so callers receive
-				// token events for the agent's answer. Thought/reasoning parts are
-				// skipped — only the actual response text is streamed.
+				// Emit the final answer as token events. Thought (reasoning) parts
+				// are surfaced as thinking events rather than dropped, so a reasoner
+				// that returns chain-of-thought alongside its final answer is not
+				// silently stripped.
 				if event.Content != nil && req.StreamCallback != nil {
 					for _, part := range event.Content.Parts {
-						if part != nil && part.Text != "" && !part.Thought {
+						if part == nil || part.Text == "" {
+							continue
+						}
+						if part.Thought {
+							req.StreamCallback(StreamEvent{
+								Type: StreamEventThinking,
+								Role: "reasoning",
+								Text: part.Text,
+							})
+						} else {
 							req.StreamCallback(StreamEvent{
 								Type: StreamEventTextDelta,
 								Text: part.Text,
