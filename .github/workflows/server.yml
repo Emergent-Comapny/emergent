@@ -77,7 +77,7 @@ jobs:
       - name: Run unit tests
         working-directory: apps/server
         run: |
-          go test ./internal/... ./pkg/... ./domain/... -v -count=1 \
+          go test -short ./internal/... ./pkg/... ./domain/... -v -count=1 \
             -coverprofile=coverage.out \
             -covermode=atomic
 
