@@ -3,8 +3,10 @@ package schemas
 import (
 	"context"
 	"crypto/md5"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -579,6 +581,59 @@ func (r *Repository) DeleteAssignment(ctx context.Context, projectID, assignment
 	return nil
 }
 
+// GetActiveAssignment returns the active (non-removed) pack assignment for a
+// project and schema, or nil when no active assignment exists.
+func (r *Repository) GetActiveAssignment(ctx context.Context, projectID, schemaID string) (*ProjectMemorySchema, error) {
+	var a ProjectMemorySchema
+	err := r.db.NewSelect().
+		Model(&a).
+		Where("project_id = ?", projectID).
+		Where("schema_id = ?", schemaID).
+		Where("removed_at IS NULL").
+		Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		r.log.Error("failed to get active assignment", logger.Error(err))
+		return nil, apperror.ErrDatabase.WithInternal(err)
+	}
+	return &a, nil
+}
+
+// DeleteAssignmentIfOwned soft-deletes a pack assignment only when this
+// blueprint is the effective owner and no other applied blueprint still claims
+// the pack. Returns true when the assignment was removed, false when left in
+// place (manual, shared, or already removed).
+func (r *Repository) DeleteAssignmentIfOwned(ctx context.Context, projectID, schemaID, blueprintID string) (bool, error) {
+	res, err := r.db.NewRaw(`
+		UPDATE kb.project_schemas ps
+		SET removed_at = now(), updated_at = now()
+		WHERE ps.project_id = ? AND ps.schema_id = ? AND ps.removed_at IS NULL
+		  AND ps.source_blueprint_id IS NOT NULL
+		  AND (
+		      ps.source_blueprint_id = ?
+		      OR NOT EXISTS (
+		          SELECT 1 FROM kb.blueprint_applications bpa
+		          WHERE bpa.project_id = ps.project_id
+		            AND bpa.blueprint_id = ps.source_blueprint_id
+		            AND bpa.status = 'applied'
+		      )
+		  )
+		  AND NOT EXISTS (
+		      SELECT 1 FROM kb.blueprint_pack_claims bpc
+		      WHERE bpc.project_id = ps.project_id
+		        AND bpc.schema_id = ps.schema_id
+		  )
+	`, projectID, schemaID, blueprintID).Exec(ctx)
+	if err != nil {
+		r.log.Error("failed to delete assignment if owned", logger.Error(err))
+		return false, apperror.ErrDatabase.WithInternal(err)
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 // CreatePack creates a new schema scoped to the given project
 func (r *Repository) CreatePack(ctx context.Context, projectID string, req *CreatePackRequest) (*GraphMemorySchema, error) {
 	objectTypeSchemas := req.GetObjectTypeSchemas()
@@ -782,6 +837,25 @@ func (r *Repository) AssignPackWithTypes(ctx context.Context, projectID, userID 
 		return nil, apperror.ErrBadRequest.WithMessage("schema already assigned to project")
 	}
 
+	// Look for a soft-deleted assignment to reactivate (re-assign after unapply
+	// must update the existing row rather than insert, since the (project_id,
+	// schema_id) unique constraint does not cover removed rows).
+	var softDeleted ProjectMemorySchema
+	hasSoftDeleted := false
+	if !alreadyAssigned {
+		err = r.db.NewSelect().
+			Model(&softDeleted).
+			Where("project_id = ?", projectID).
+			Where("schema_id = ?", req.SchemaID).
+			Where("removed_at IS NOT NULL").
+			Order("updated_at DESC").
+			Limit(1).
+			Scan(ctx)
+		if err == nil {
+			hasSoftDeleted = true
+		}
+	}
+
 	// Parse object type schemas.
 	// Schemas stored from user files use an array of {name, label, properties, ...}.
 	// Schemas stored from blueprint seeds use a map of name → definition.
@@ -908,21 +982,36 @@ func (r *Repository) AssignPackWithTypes(ctx context.Context, projectID, userID 
 	// Execute in a transaction
 	now := time.Now()
 	assignment := &ProjectMemorySchema{
-		ProjectID:   projectID,
-		SchemaID:    req.SchemaID,
-		Active:      true,
-		InstalledAt: now,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ProjectID:         projectID,
+		SchemaID:          req.SchemaID,
+		Active:            true,
+		InstalledAt:       now,
+		SourceBlueprintID: req.SourceBlueprintID,
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 
 	err = r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		if !alreadyAssigned {
+		switch {
+		case alreadyAssigned:
+			assignment.ID = existingAssignment.ID
+		case hasSoftDeleted:
+			if _, err := tx.NewUpdate().
+				Model((*ProjectMemorySchema)(nil)).
+				Set("removed_at = ?", nil).
+				Set("active = ?", true).
+				Set("installed_at = ?", now).
+				Set("updated_at = ?", now).
+				Set("source_blueprint_id = ?", req.SourceBlueprintID).
+				Where("id = ?", softDeleted.ID).
+				Exec(ctx); err != nil {
+				return err
+			}
+			assignment.ID = softDeleted.ID
+		default:
 			if _, err := tx.NewInsert().Model(assignment).Returning("id").Exec(ctx); err != nil {
 				return err
 			}
-		} else {
-			assignment.ID = existingAssignment.ID
 		}
 
 		for _, a := range actions {

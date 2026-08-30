@@ -331,3 +331,48 @@ func TestRepository_Delete_ThenGetByID_NotFound(t *testing.T) {
 	err = repo.Delete(ctx, bp.ID)
 	assertAppErrorCode(t, err, apperror.ErrNotFound.Code)
 }
+
+// TestRepository_RecordAndListApplied verifies application provenance: an
+// apply record joins blueprint metadata, and a re-apply upserts (no duplicate
+// row) with the updated checksum.
+func TestRepository_RecordAndListApplied(t *testing.T) {
+	db := connectTestDB(t)
+	repo := NewRepository(db, testLogger())
+	ctx := context.Background()
+
+	_, projectID := seedProject(t, db)
+
+	bp := testBlueprint(uniqueName("applied"), "1.0.0")
+	require.NoError(t, repo.Create(ctx, bp))
+
+	userID := uuid.NewString()
+	app := &BlueprintApplication{
+		BlueprintID: bp.ID,
+		ProjectID:   projectID,
+		Version:     bp.Version,
+		Checksum:    "abc123",
+		AppliedBy:   &userID,
+		AppliedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	require.NoError(t, repo.RecordApplication(ctx, app))
+
+	got, err := repo.ListApplied(ctx, projectID)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, bp.ID, got[0].BlueprintID)
+	assert.Equal(t, bp.Name, got[0].Name)
+	assert.Equal(t, bp.Version, got[0].Version)
+	assert.Equal(t, "abc123", got[0].Checksum)
+
+	// Re-apply with a new checksum must upsert, not insert a duplicate.
+	app.Checksum = "def456"
+	app.AppliedAt = time.Now()
+	app.UpdatedAt = time.Now()
+	require.NoError(t, repo.RecordApplication(ctx, app))
+
+	got, err = repo.ListApplied(ctx, projectID)
+	require.NoError(t, err)
+	require.Len(t, got, 1, "re-apply must upsert, not insert a duplicate row")
+	assert.Equal(t, "def456", got[0].Checksum)
+}
