@@ -235,3 +235,56 @@ func TestToolPool_ToolNames_ReturnsAllCachedNames(t *testing.T) {
 		assert.Contains(t, names, n)
 	}
 }
+
+// --- convertToolResult ---
+
+func TestConvertToolResult(t *testing.T) {
+	t.Run("object result stays flattened", func(t *testing.T) {
+		out, err := convertToolResult(&mcp.ToolResult{
+			Content: []mcp.ContentBlock{{Type: "text", Text: `{"name":"diane","count":3}`}},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, true, out["ok"])
+		assert.Equal(t, "diane", out["name"])
+		assert.Equal(t, float64(3), out["count"])
+	})
+
+	t.Run("object result preserves existing ok", func(t *testing.T) {
+		out, err := convertToolResult(&mcp.ToolResult{
+			Content: []mcp.ContentBlock{{Type: "text", Text: `{"ok":false,"failed":1}`}},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, false, out["ok"])
+		assert.Equal(t, float64(1), out["failed"])
+	})
+
+	t.Run("array result is decoded not re-encoded", func(t *testing.T) {
+		out, err := convertToolResult(&mcp.ToolResult{
+			Content: []mcp.ContentBlock{{Type: "text", Text: `[{"id":"a1"},{"id":"a2"}]`}},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, true, out["ok"])
+		results, ok := out["result"].([]any)
+		require.True(t, ok, "result should be a decoded array, got %T", out["result"])
+		assert.Len(t, results, 2)
+	})
+
+	t.Run("non-json text falls back to string result", func(t *testing.T) {
+		out, err := convertToolResult(&mcp.ToolResult{
+			Content: []mcp.ContentBlock{{Type: "text", Text: "hello world"}},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, true, out["ok"])
+		assert.Equal(t, "hello world", out["result"])
+	})
+
+	t.Run("error result surfaces ok=false", func(t *testing.T) {
+		out, err := convertToolResult(&mcp.ToolResult{
+			IsError: true,
+			Content: []mcp.ContentBlock{{Type: "text", Text: "boom"}},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, false, out["ok"])
+		assert.Equal(t, "boom", out["error"])
+	})
+}
