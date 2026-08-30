@@ -20,6 +20,10 @@ const (
 	// EventError is emitted when an error occurs during streaming.
 	EventError ChatEventType = "error"
 
+	// EventApproval is emitted when a tool-policy confirmation gate intercepts
+	// a tool call and pauses the run awaiting user approval.
+	EventApproval ChatEventType = "approval"
+
 	// EventDone is the final event, signaling end of stream.
 	EventDone ChatEventType = "done"
 )
@@ -107,6 +111,26 @@ func NewMCPToolEvent(tool, status string, result any, errMsg string) MCPToolEven
 		Status: status,
 		Result: result,
 		Error:  errMsg,
+	}
+}
+
+// ApprovalEvent is emitted when a tool-policy confirmation gate intercepts a
+// tool call and pauses the run awaiting user approval. The gateway surfaces it
+// as an approval card in the chat stream.
+type ApprovalEvent struct {
+	Type       string         `json:"type"`
+	Tool       string         `json:"tool"`
+	Input      map[string]any `json:"input,omitempty"`
+	QuestionID string         `json:"questionId"`
+}
+
+// NewApprovalEvent creates a new approval event.
+func NewApprovalEvent(tool string, input map[string]any, questionID string) ApprovalEvent {
+	return ApprovalEvent{
+		Type:       string(EventApproval),
+		Tool:       tool,
+		Input:      input,
+		QuestionID: questionID,
 	}
 }
 

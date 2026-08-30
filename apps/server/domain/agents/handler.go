@@ -1445,27 +1445,33 @@ func (h *Handler) CreateDefinition(c echo.Context) error {
 		dispatchMode = dto.DispatchMode
 	}
 
+	defaultToolPolicy := dto.DefaultToolPolicy
+	if defaultToolPolicy == "" {
+		defaultToolPolicy = ToolPolicyDefaultAllow
+	}
+
 	def := &AgentDefinition{
-		ProjectID:      projectID,
-		Name:           dto.Name,
-		Description:    dto.Description,
-		SystemPrompt:   dto.SystemPrompt,
-		Model:          dto.Model,
-		Tools:          tools,
-		BannedTools:    dto.BannedTools,
-		Skills:         skillNames,
-		AutoLoadSkills: dto.AutoLoadSkills != nil && *dto.AutoLoadSkills,
-		FlowType:       flowType,
-		IsDefault:      isDefault,
-		Enabled:        enabled,
-		MaxSteps:       dto.MaxSteps,
-		DefaultTimeout: dto.DefaultTimeout,
-		Visibility:     visibility,
-		DispatchMode:   dispatchMode,
-		ACPConfig:      dto.ACPConfig,
-		Config:         config,
-		SandboxConfig:  dto.SandboxConfig,
-		ToolPolicies:   dto.ToolPolicies,
+		ProjectID:         projectID,
+		Name:              dto.Name,
+		Description:       dto.Description,
+		SystemPrompt:      dto.SystemPrompt,
+		Model:             dto.Model,
+		Tools:             tools,
+		BannedTools:       dto.BannedTools,
+		Skills:            skillNames,
+		AutoLoadSkills:    dto.AutoLoadSkills != nil && *dto.AutoLoadSkills,
+		FlowType:          flowType,
+		IsDefault:         isDefault,
+		Enabled:           enabled,
+		MaxSteps:          dto.MaxSteps,
+		DefaultTimeout:    dto.DefaultTimeout,
+		Visibility:        visibility,
+		DispatchMode:      dispatchMode,
+		ACPConfig:         dto.ACPConfig,
+		Config:            config,
+		SandboxConfig:     dto.SandboxConfig,
+		ToolPolicies:      dto.ToolPolicies,
+		DefaultToolPolicy: defaultToolPolicy,
 	}
 
 	// Check for existing definition with same name to return a clear 409 instead of a 500
@@ -1576,6 +1582,9 @@ func (h *Handler) UpdateDefinition(c echo.Context) error {
 	}
 	if dto.ToolPolicies != nil {
 		def.ToolPolicies = dto.ToolPolicies
+	}
+	if dto.DefaultToolPolicy != nil {
+		def.DefaultToolPolicy = *dto.DefaultToolPolicy
 	}
 
 	if err := h.repo.UpdateDefinition(c.Request().Context(), def); err != nil {
@@ -2707,9 +2716,14 @@ func (h *Handler) HandleRespondToQuestion(c echo.Context) error {
 		return apperror.ErrConflict.WithMessage(fmt.Sprintf("run is %s, expected paused", run.Status))
 	}
 
-	// Update the question with the response
-	if err := h.repo.AnswerQuestion(c.Request().Context(), questionID, req.Response, user.ID); err != nil {
+	// Atomically claim the question. A concurrent respond/cancel that won the
+	// race leaves claimed=false and must not resume the run.
+	claimed, err := h.repo.AnswerQuestion(c.Request().Context(), questionID, req.Response, user.ID)
+	if err != nil {
 		return apperror.NewInternal("failed to answer question", err)
+	}
+	if !claimed {
+		return apperror.ErrConflict.WithMessage("question is no longer pending")
 	}
 
 	// Update notification action status if notification was created (non-fatal)
@@ -2723,18 +2737,12 @@ func (h *Handler) HandleRespondToQuestion(c echo.Context) error {
 		// Look up the agent to build the resume request
 		agent, err := h.repo.FindByID(c.Request().Context(), run.AgentID, nil)
 		if err != nil || agent == nil {
+			_ = h.repo.ReopenQuestion(c.Request().Context(), questionID)
 			return apperror.NewInternal("failed to find agent for resume", err)
 		}
 
 		// Look up the agent definition (optional, may be nil)
 		agentDef, _ := h.repo.ResolveDefinitionForAgent(c.Request().Context(), agent)
-
-		// Resolve OrgID — required for LLM credential resolution and ephemeral token minting.
-		// Without it, CreateModel fails silently inside runPipeline.
-		orgID := user.OrgID
-		if orgID == "" {
-			orgID, _ = h.repo.GetOrgIDByProjectID(c.Request().Context(), agent.ProjectID)
-		}
 
 		// Build the resume user message.
 		// For tool-policy confirmation questions, pass just the button value (e.g. "approve"
@@ -2751,6 +2759,15 @@ func (h *Handler) HandleRespondToQuestion(c echo.Context) error {
 					break
 				}
 			}
+			// Record the approval decision in the audit trail.
+			decision := "rejected"
+			switch userMessage {
+			case "approve":
+				decision = "approved"
+			case "cancel":
+				decision = "cancelled"
+			}
+			_ = h.repo.UpdateToolApprovalDecision(c.Request().Context(), questionID, decision, req.Message, user.ID)
 		} else {
 			userMessage = fmt.Sprintf(
 				"Previously you asked: \"%s\"\nThe user responded: \"%s\"\nContinue from where you left off.",
@@ -2758,78 +2775,11 @@ func (h *Handler) HandleRespondToQuestion(c echo.Context) error {
 			)
 		}
 
-		// Pre-create the resume run synchronously so we can return its ID in the response.
-		// The executor's Resume method will reuse this run via PreCreatedRun.
-		maxSteps := MaxTotalStepsPerRun
-		resumedFrom := run.ID
-		var createErr error
-		preCreatedRun, createErr = h.repo.CreateRunWithOptions(c.Request().Context(), CreateRunOptions{
-			AgentID:          run.AgentID,
-			MaxSteps:         &maxSteps,
-			ResumedFrom:      &resumedFrom,
-			InitialStepCount: run.StepCount,
-			TriggerMetadata:  run.TriggerMetadata,
-		})
-		if createErr != nil {
-			return apperror.NewInternal("failed to pre-create resume run", createErr)
+		preCreatedRun, err = h.resumeQuestionRun(c, user, run, agent, agentDef, userMessage, req.Message)
+		if err != nil {
+			_ = h.repo.ReopenQuestion(c.Request().Context(), questionID)
+			return err
 		}
-
-		// Persist resume_run_id in suspend_context so GET run can expose it.
-		if run.SuspendContext != nil {
-			sc := make(map[string]any, len(run.SuspendContext)+1)
-			for k, v := range run.SuspendContext {
-				sc[k] = v
-			}
-			sc["resume_run_id"] = preCreatedRun.ID
-			_ = h.repo.UpdateSuspendContext(c.Request().Context(), run.ID, sc)
-		}
-
-		resumeAuthToken := auth.RawTokenFromContext(c.Request().Context())
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					slog.Error("panic in resume goroutine",
-						slog.String("run_id", run.ID),
-						slog.Any("panic", r),
-					)
-					ctx := context.Background()
-					if repoErr := h.repo.FailRunWithSteps(ctx, run.ID, fmt.Sprintf("panic: %v", r), run.StepCount); repoErr != nil {
-						slog.Error("failed to mark run as error after panic",
-							slog.String("run_id", run.ID),
-							slog.String("error", repoErr.Error()),
-						)
-					}
-				}
-			}()
-			ctx := context.Background()
-			result, err := h.executor.Resume(ctx, run, ExecuteRequest{
-				Agent:           agent,
-				AgentDefinition: agentDef,
-				ProjectID:       agent.ProjectID,
-				OrgID:           orgID,
-				UserMessage:     userMessage,
-				UserID:          user.ID, // propagate for ask_user notifications
-				AuthToken:       resumeAuthToken,
-				PreCreatedRun:   preCreatedRun,
-			})
-			if result != nil && result.Cleanup != nil {
-				result.Cleanup()
-			}
-			if err != nil {
-				slog.Error("failed to resume agent after question response",
-					slog.String("run_id", run.ID),
-					slog.String("question_id", questionID),
-					slog.String("error", err.Error()),
-				)
-				// Mark the run as failed so it does not remain stuck in paused state.
-				if repoErr := h.repo.FailRunWithSteps(ctx, run.ID, fmt.Sprintf("resume failed: %s", err.Error()), run.StepCount); repoErr != nil {
-					slog.Error("failed to mark run as error after resume failure",
-						slog.String("run_id", run.ID),
-						slog.String("error", repoErr.Error()),
-					)
-				}
-			}
-		}()
 	}
 
 	// Re-fetch the question to return the updated state
@@ -2842,6 +2792,177 @@ func (h *Handler) HandleRespondToQuestion(c echo.Context) error {
 	}
 
 	// Attach resume_run_id so clients can poll the correct run ID.
+	if preCreatedRun != nil {
+		dto.ResumeRunID = &preCreatedRun.ID
+	}
+
+	return c.JSON(http.StatusAccepted, SuccessResponse(dto))
+}
+
+// resumeQuestionRun resumes a paused run after a question decision. It pre-creates
+// the resume run, persists the resume_run_id, and launches the resume goroutine
+// with the given resolved user message and optional reject message. It returns
+// the pre-created run (whose ID clients poll) or an error.
+func (h *Handler) resumeQuestionRun(c echo.Context, user *auth.AuthUser, run *AgentRun, agent *Agent, agentDef *AgentDefinition, userMessage, rejectMessage string) (*AgentRun, error) {
+	orgID := user.OrgID
+	if orgID == "" {
+		orgID, _ = h.repo.GetOrgIDByProjectID(c.Request().Context(), agent.ProjectID)
+	}
+
+	maxSteps := MaxTotalStepsPerRun
+	resumedFrom := run.ID
+	preCreatedRun, err := h.repo.CreateRunWithOptions(c.Request().Context(), CreateRunOptions{
+		AgentID:          run.AgentID,
+		MaxSteps:         &maxSteps,
+		ResumedFrom:      &resumedFrom,
+		InitialStepCount: run.StepCount,
+		TriggerMetadata:  run.TriggerMetadata,
+	})
+	if err != nil {
+		return nil, apperror.NewInternal("failed to pre-create resume run", err)
+	}
+
+	if run.SuspendContext != nil {
+		sc := make(map[string]any, len(run.SuspendContext)+1)
+		for k, v := range run.SuspendContext {
+			sc[k] = v
+		}
+		sc["resume_run_id"] = preCreatedRun.ID
+		_ = h.repo.UpdateSuspendContext(c.Request().Context(), run.ID, sc)
+	}
+
+	resumeAuthToken := auth.RawTokenFromContext(c.Request().Context())
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("panic in resume goroutine",
+					slog.String("run_id", run.ID),
+					slog.Any("panic", r),
+				)
+				ctx := context.Background()
+				if repoErr := h.repo.FailRunWithSteps(ctx, run.ID, fmt.Sprintf("panic: %v", r), run.StepCount); repoErr != nil {
+					slog.Error("failed to mark run as error after panic",
+						slog.String("run_id", run.ID),
+						slog.String("error", repoErr.Error()),
+					)
+				}
+			}
+		}()
+		ctx := context.Background()
+		result, err := h.executor.Resume(ctx, run, ExecuteRequest{
+			Agent:           agent,
+			AgentDefinition: agentDef,
+			ProjectID:       agent.ProjectID,
+			OrgID:           orgID,
+			UserMessage:     userMessage,
+			RejectMessage:   rejectMessage,
+			UserID:          user.ID, // propagate for ask_user notifications
+			AuthToken:       resumeAuthToken,
+			PreCreatedRun:   preCreatedRun,
+		})
+		if result != nil && result.Cleanup != nil {
+			result.Cleanup()
+		}
+		if err != nil {
+			slog.Error("failed to resume agent after question response",
+				slog.String("run_id", run.ID),
+				slog.String("error", err.Error()),
+			)
+			// Mark the run as failed so it does not remain stuck in paused state.
+			if repoErr := h.repo.FailRunWithSteps(ctx, run.ID, fmt.Sprintf("resume failed: %s", err.Error()), run.StepCount); repoErr != nil {
+				slog.Error("failed to mark run as error after resume failure",
+					slog.String("run_id", run.ID),
+					slog.String("error", repoErr.Error()),
+				)
+			}
+		}
+	}()
+
+	return preCreatedRun, nil
+}
+
+// HandleCancelQuestion handles POST /api/projects/:projectId/agent-questions/:questionId/cancel
+// Revokes a pending tool-policy confirmation: the question is marked cancelled,
+// the run resumes with the call treated as not taken, and the decision is audited.
+func (h *Handler) HandleCancelQuestion(c echo.Context) error {
+	user := auth.GetUser(c)
+	if user == nil {
+		return apperror.ErrUnauthorized
+	}
+
+	projectID := c.Param("projectId")
+	if projectID == "" {
+		return apperror.NewBadRequest("projectId is required")
+	}
+
+	questionID := c.Param("questionId")
+	if questionID == "" {
+		return apperror.NewBadRequest("questionId is required")
+	}
+
+	question, err := h.repo.FindQuestionByID(c.Request().Context(), questionID)
+	if err != nil {
+		return apperror.NewInternal("failed to get question", err)
+	}
+	if question == nil {
+		return apperror.NewNotFound("AgentQuestion", questionID)
+	}
+	if question.ProjectID != projectID {
+		return apperror.NewNotFound("AgentQuestion", questionID)
+	}
+	if question.Status != QuestionStatusPending {
+		return apperror.ErrConflict.WithMessage(fmt.Sprintf("question is already %s", question.Status))
+	}
+
+	run, err := h.repo.FindRunByID(c.Request().Context(), question.RunID)
+	if err != nil {
+		return apperror.NewInternal("failed to get run", err)
+	}
+	if run == nil {
+		return apperror.NewInternal("associated run not found", nil)
+	}
+	if run.Status != RunStatusPaused {
+		return apperror.ErrConflict.WithMessage(fmt.Sprintf("run is %s, expected paused", run.Status))
+	}
+
+	claimed, err := h.repo.CancelQuestion(c.Request().Context(), questionID)
+	if err != nil {
+		return apperror.NewInternal("failed to cancel question", err)
+	}
+	if !claimed {
+		return apperror.ErrConflict.WithMessage("question is no longer pending")
+	}
+
+	// Record the cancellation in the audit trail (only affects tool-confirm approvals).
+	_ = h.repo.UpdateToolApprovalDecision(c.Request().Context(), questionID, "cancelled", "", user.ID)
+
+	if question.NotificationID != nil {
+		_ = h.repo.UpdateNotificationActionStatus(c.Request().Context(), *question.NotificationID, "cancelled", user.ID)
+	}
+
+	var preCreatedRun *AgentRun
+	if h.executor != nil {
+		agent, err := h.repo.FindByID(c.Request().Context(), run.AgentID, nil)
+		if err != nil || agent == nil {
+			_ = h.repo.ReopenQuestion(c.Request().Context(), questionID)
+			return apperror.NewInternal("failed to find agent for resume", err)
+		}
+		agentDef, _ := h.repo.ResolveDefinitionForAgent(c.Request().Context(), agent)
+
+		preCreatedRun, err = h.resumeQuestionRun(c, user, run, agent, agentDef, "cancel", "")
+		if err != nil {
+			_ = h.repo.ReopenQuestion(c.Request().Context(), questionID)
+			return err
+		}
+	}
+
+	updatedQuestion, err := h.repo.FindQuestionByID(c.Request().Context(), questionID)
+	var dto *AgentQuestionDTO
+	if err != nil || updatedQuestion == nil {
+		dto = question.ToDTO()
+	} else {
+		dto = updatedQuestion.ToDTO()
+	}
 	if preCreatedRun != nil {
 		dto.ResumeRunID = &preCreatedRun.ID
 	}
