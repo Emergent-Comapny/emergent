@@ -1939,10 +1939,13 @@ func (r *Repository) CancelPendingQuestionsForRun(ctx context.Context, runID str
 	return err
 }
 
-// AnswerQuestion updates a question with the user's response.
-func (r *Repository) AnswerQuestion(ctx context.Context, id string, response string, respondedBy string) error {
+// AnswerQuestion atomically claims a pending question by recording the user's
+// response. Returns true when this call won the claim (the question was
+// pending), false when it was already answered/cancelled (lost a concurrent
+// claim). Callers must only resume the run when claimed is true.
+func (r *Repository) AnswerQuestion(ctx context.Context, id string, response string, respondedBy string) (bool, error) {
 	now := time.Now()
-	_, err := r.db.NewUpdate().
+	res, err := r.db.NewUpdate().
 		Model((*AgentQuestion)(nil)).
 		Set("response = ?", response).
 		Set("responded_by = ?", respondedBy).
@@ -1952,7 +1955,11 @@ func (r *Repository) AnswerQuestion(ctx context.Context, id string, response str
 		Where("id = ?", id).
 		Where("status = ?", QuestionStatusPending).
 		Exec(ctx)
-	return err
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 // CreateToolApproval inserts a pending tool-approval audit record.
@@ -1984,15 +1991,35 @@ func (r *Repository) UpdateToolApprovalDecision(ctx context.Context, questionID,
 	return err
 }
 
-// CancelQuestion marks a pending question as cancelled.
-func (r *Repository) CancelQuestion(ctx context.Context, id string) error {
+// CancelQuestion atomically claims a pending question by marking it cancelled.
+// Returns true when this call won the claim, false when the question was
+// already answered/cancelled. Callers must only resume the run when claimed.
+func (r *Repository) CancelQuestion(ctx context.Context, id string) (bool, error) {
 	now := time.Now()
-	_, err := r.db.NewUpdate().
+	res, err := r.db.NewUpdate().
 		Model((*AgentQuestion)(nil)).
 		Set("status = ?", QuestionStatusCancelled).
 		Set("updated_at = ?", now).
 		Where("id = ?", id).
 		Where("status = ?", QuestionStatusPending).
+		Exec(ctx)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// ReopenQuestion reverts a claimed question back to pending so the user can
+// retry after a resume-setup failure. Used only on the error path after a
+// successful claim, so a failed resume does not leave the run stuck paused.
+func (r *Repository) ReopenQuestion(ctx context.Context, id string) error {
+	now := time.Now()
+	_, err := r.db.NewUpdate().
+		Model((*AgentQuestion)(nil)).
+		Set("status = ?", QuestionStatusPending).
+		Set("updated_at = ?", now).
+		Where("id = ?", id).
 		Exec(ctx)
 	return err
 }

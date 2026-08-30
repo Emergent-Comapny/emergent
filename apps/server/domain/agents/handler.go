@@ -1445,27 +1445,33 @@ func (h *Handler) CreateDefinition(c echo.Context) error {
 		dispatchMode = dto.DispatchMode
 	}
 
+	defaultToolPolicy := dto.DefaultToolPolicy
+	if defaultToolPolicy == "" {
+		defaultToolPolicy = ToolPolicyDefaultAllow
+	}
+
 	def := &AgentDefinition{
-		ProjectID:      projectID,
-		Name:           dto.Name,
-		Description:    dto.Description,
-		SystemPrompt:   dto.SystemPrompt,
-		Model:          dto.Model,
-		Tools:          tools,
-		BannedTools:    dto.BannedTools,
-		Skills:         skillNames,
-		AutoLoadSkills: dto.AutoLoadSkills != nil && *dto.AutoLoadSkills,
-		FlowType:       flowType,
-		IsDefault:      isDefault,
-		Enabled:        enabled,
-		MaxSteps:       dto.MaxSteps,
-		DefaultTimeout: dto.DefaultTimeout,
-		Visibility:     visibility,
-		DispatchMode:   dispatchMode,
-		ACPConfig:      dto.ACPConfig,
-		Config:         config,
-		SandboxConfig:  dto.SandboxConfig,
-		ToolPolicies:   dto.ToolPolicies,
+		ProjectID:         projectID,
+		Name:              dto.Name,
+		Description:       dto.Description,
+		SystemPrompt:      dto.SystemPrompt,
+		Model:             dto.Model,
+		Tools:             tools,
+		BannedTools:       dto.BannedTools,
+		Skills:            skillNames,
+		AutoLoadSkills:    dto.AutoLoadSkills != nil && *dto.AutoLoadSkills,
+		FlowType:          flowType,
+		IsDefault:         isDefault,
+		Enabled:           enabled,
+		MaxSteps:          dto.MaxSteps,
+		DefaultTimeout:    dto.DefaultTimeout,
+		Visibility:        visibility,
+		DispatchMode:      dispatchMode,
+		ACPConfig:         dto.ACPConfig,
+		Config:            config,
+		SandboxConfig:     dto.SandboxConfig,
+		ToolPolicies:      dto.ToolPolicies,
+		DefaultToolPolicy: defaultToolPolicy,
 	}
 
 	// Check for existing definition with same name to return a clear 409 instead of a 500
@@ -1576,6 +1582,9 @@ func (h *Handler) UpdateDefinition(c echo.Context) error {
 	}
 	if dto.ToolPolicies != nil {
 		def.ToolPolicies = dto.ToolPolicies
+	}
+	if dto.DefaultToolPolicy != nil {
+		def.DefaultToolPolicy = *dto.DefaultToolPolicy
 	}
 
 	if err := h.repo.UpdateDefinition(c.Request().Context(), def); err != nil {
@@ -2707,9 +2716,14 @@ func (h *Handler) HandleRespondToQuestion(c echo.Context) error {
 		return apperror.ErrConflict.WithMessage(fmt.Sprintf("run is %s, expected paused", run.Status))
 	}
 
-	// Update the question with the response
-	if err := h.repo.AnswerQuestion(c.Request().Context(), questionID, req.Response, user.ID); err != nil {
+	// Atomically claim the question. A concurrent respond/cancel that won the
+	// race leaves claimed=false and must not resume the run.
+	claimed, err := h.repo.AnswerQuestion(c.Request().Context(), questionID, req.Response, user.ID)
+	if err != nil {
 		return apperror.NewInternal("failed to answer question", err)
+	}
+	if !claimed {
+		return apperror.ErrConflict.WithMessage("question is no longer pending")
 	}
 
 	// Update notification action status if notification was created (non-fatal)
@@ -2723,6 +2737,7 @@ func (h *Handler) HandleRespondToQuestion(c echo.Context) error {
 		// Look up the agent to build the resume request
 		agent, err := h.repo.FindByID(c.Request().Context(), run.AgentID, nil)
 		if err != nil || agent == nil {
+			_ = h.repo.ReopenQuestion(c.Request().Context(), questionID)
 			return apperror.NewInternal("failed to find agent for resume", err)
 		}
 
@@ -2762,6 +2777,7 @@ func (h *Handler) HandleRespondToQuestion(c echo.Context) error {
 
 		preCreatedRun, err = h.resumeQuestionRun(c, user, run, agent, agentDef, userMessage, req.Message)
 		if err != nil {
+			_ = h.repo.ReopenQuestion(c.Request().Context(), questionID)
 			return err
 		}
 	}
@@ -2909,8 +2925,12 @@ func (h *Handler) HandleCancelQuestion(c echo.Context) error {
 		return apperror.ErrConflict.WithMessage(fmt.Sprintf("run is %s, expected paused", run.Status))
 	}
 
-	if err := h.repo.CancelQuestion(c.Request().Context(), questionID); err != nil {
+	claimed, err := h.repo.CancelQuestion(c.Request().Context(), questionID)
+	if err != nil {
 		return apperror.NewInternal("failed to cancel question", err)
+	}
+	if !claimed {
+		return apperror.ErrConflict.WithMessage("question is no longer pending")
 	}
 
 	// Record the cancellation in the audit trail (only affects tool-confirm approvals).
@@ -2924,12 +2944,14 @@ func (h *Handler) HandleCancelQuestion(c echo.Context) error {
 	if h.executor != nil {
 		agent, err := h.repo.FindByID(c.Request().Context(), run.AgentID, nil)
 		if err != nil || agent == nil {
+			_ = h.repo.ReopenQuestion(c.Request().Context(), questionID)
 			return apperror.NewInternal("failed to find agent for resume", err)
 		}
 		agentDef, _ := h.repo.ResolveDefinitionForAgent(c.Request().Context(), agent)
 
 		preCreatedRun, err = h.resumeQuestionRun(c, user, run, agent, agentDef, "cancel", "")
 		if err != nil {
+			_ = h.repo.ReopenQuestion(c.Request().Context(), questionID)
 			return err
 		}
 	}

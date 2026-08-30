@@ -296,30 +296,31 @@ type AgentWithDefinitionDTO struct {
 
 // AgentDefinitionDTO is the full response DTO for an agent definition
 type AgentDefinitionDTO struct {
-	ID             string                `json:"id"`
-	ProductID      *string               `json:"productId,omitempty"`
-	ProjectID      string                `json:"projectId"`
-	Name           string                `json:"name"`
-	Description    *string               `json:"description,omitempty"`
-	SystemPrompt   *string               `json:"systemPrompt,omitempty"`
-	Model          *ModelConfig          `json:"model,omitempty"`
-	Tools          []string              `json:"tools"`
-	BannedTools    []string              `json:"bannedTools,omitempty"`
-	Skills         []string              `json:"skills"`
-	AutoLoadSkills bool                  `json:"autoLoadSkills"`
-	FlowType       AgentFlowType         `json:"flowType"`
-	IsDefault      bool                  `json:"isDefault"`
-	Enabled        bool                  `json:"enabled"`
-	MaxSteps       *int                  `json:"maxSteps,omitempty"`
-	DefaultTimeout *int                  `json:"defaultTimeout,omitempty"`
-	Visibility     AgentVisibility       `json:"visibility"`
-	DispatchMode   AgentDispatchMode     `json:"dispatchMode"`
-	ACPConfig      *ACPConfig            `json:"acpConfig,omitempty"`
-	Config         map[string]any        `json:"config,omitempty"`
-	SandboxConfig  map[string]any        `json:"workspaceConfig,omitempty"`
-	ToolPolicies   map[string]ToolPolicy `json:"toolPolicies,omitempty"`
-	CreatedAt      time.Time             `json:"createdAt"`
-	UpdatedAt      time.Time             `json:"updatedAt"`
+	ID                string                `json:"id"`
+	ProductID         *string               `json:"productId,omitempty"`
+	ProjectID         string                `json:"projectId"`
+	Name              string                `json:"name"`
+	Description       *string               `json:"description,omitempty"`
+	SystemPrompt      *string               `json:"systemPrompt,omitempty"`
+	Model             *ModelConfig          `json:"model,omitempty"`
+	Tools             []string              `json:"tools"`
+	BannedTools       []string              `json:"bannedTools,omitempty"`
+	Skills            []string              `json:"skills"`
+	AutoLoadSkills    bool                  `json:"autoLoadSkills"`
+	FlowType          AgentFlowType         `json:"flowType"`
+	IsDefault         bool                  `json:"isDefault"`
+	Enabled           bool                  `json:"enabled"`
+	MaxSteps          *int                  `json:"maxSteps,omitempty"`
+	DefaultTimeout    *int                  `json:"defaultTimeout,omitempty"`
+	Visibility        AgentVisibility       `json:"visibility"`
+	DispatchMode      AgentDispatchMode     `json:"dispatchMode"`
+	ACPConfig         *ACPConfig            `json:"acpConfig,omitempty"`
+	Config            map[string]any        `json:"config,omitempty"`
+	SandboxConfig     map[string]any        `json:"workspaceConfig,omitempty"`
+	ToolPolicies      map[string]ToolPolicy `json:"toolPolicies,omitempty"`
+	DefaultToolPolicy ToolPolicyDefault     `json:"defaultToolPolicy,omitempty"`
+	CreatedAt         time.Time             `json:"createdAt"`
+	UpdatedAt         time.Time             `json:"updatedAt"`
 	// EffectiveModel is the resolved generative model that will be used when
 	// this definition runs (project config → org config → env default).
 	// Only populated on GET /agent-definitions/:id, not on list endpoints.
@@ -344,48 +345,50 @@ type AgentDefinitionSummaryDTO struct {
 
 // CreateAgentDefinitionDTO is the request DTO for creating an agent definition
 type CreateAgentDefinitionDTO struct {
-	Name           string                `json:"name" validate:"required"`
-	Description    *string               `json:"description"`
-	SystemPrompt   *string               `json:"systemPrompt"`
-	Model          *ModelConfig          `json:"model"`
-	Tools          []string              `json:"tools"`
-	BannedTools    []string              `json:"bannedTools,omitempty"`
-	Skills         []string              `json:"skills"`
-	AutoLoadSkills *bool                 `json:"autoLoadSkills"`
-	FlowType       AgentFlowType         `json:"flowType"`
-	IsDefault      *bool                 `json:"isDefault"`
-	Enabled        *bool                 `json:"enabled"`
-	MaxSteps       *int                  `json:"maxSteps"`
-	DefaultTimeout *int                  `json:"defaultTimeout"`
-	Visibility     AgentVisibility       `json:"visibility"`
-	DispatchMode   AgentDispatchMode     `json:"dispatchMode"`
-	ACPConfig      *ACPConfig            `json:"acpConfig"`
-	Config         map[string]any        `json:"config"`
-	SandboxConfig  map[string]any        `json:"workspaceConfig"`
-	ToolPolicies   map[string]ToolPolicy `json:"toolPolicies,omitempty"`
+	Name              string                `json:"name" validate:"required"`
+	Description       *string               `json:"description"`
+	SystemPrompt      *string               `json:"systemPrompt"`
+	Model             *ModelConfig          `json:"model"`
+	Tools             []string              `json:"tools"`
+	BannedTools       []string              `json:"bannedTools,omitempty"`
+	Skills            []string              `json:"skills"`
+	AutoLoadSkills    *bool                 `json:"autoLoadSkills"`
+	FlowType          AgentFlowType         `json:"flowType"`
+	IsDefault         *bool                 `json:"isDefault"`
+	Enabled           *bool                 `json:"enabled"`
+	MaxSteps          *int                  `json:"maxSteps"`
+	DefaultTimeout    *int                  `json:"defaultTimeout"`
+	Visibility        AgentVisibility       `json:"visibility"`
+	DispatchMode      AgentDispatchMode     `json:"dispatchMode"`
+	ACPConfig         *ACPConfig            `json:"acpConfig"`
+	Config            map[string]any        `json:"config"`
+	SandboxConfig     map[string]any        `json:"workspaceConfig"`
+	ToolPolicies      map[string]ToolPolicy `json:"toolPolicies,omitempty"`
+	DefaultToolPolicy ToolPolicyDefault     `json:"defaultToolPolicy,omitempty"`
 }
 
 // UpdateAgentDefinitionDTO is the request DTO for updating an agent definition
 type UpdateAgentDefinitionDTO struct {
-	Name           *string               `json:"name"`
-	Description    *string               `json:"description"`
-	SystemPrompt   *string               `json:"systemPrompt"`
-	Model          *ModelConfig          `json:"model"`
-	Tools          []string              `json:"tools"`
-	BannedTools    []string              `json:"bannedTools,omitempty"`
-	Skills         []string              `json:"skills"`
-	AutoLoadSkills *bool                 `json:"autoLoadSkills"`
-	FlowType       *AgentFlowType        `json:"flowType"`
-	IsDefault      *bool                 `json:"isDefault"`
-	Enabled        *bool                 `json:"enabled"`
-	MaxSteps       *int                  `json:"maxSteps"`
-	DefaultTimeout *int                  `json:"defaultTimeout"`
-	Visibility     *AgentVisibility      `json:"visibility"`
-	DispatchMode   *AgentDispatchMode    `json:"dispatchMode"`
-	ACPConfig      *ACPConfig            `json:"acpConfig"`
-	Config         map[string]any        `json:"config"`
-	SandboxConfig  map[string]any        `json:"workspaceConfig"`
-	ToolPolicies   map[string]ToolPolicy `json:"toolPolicies,omitempty"`
+	Name              *string               `json:"name"`
+	Description       *string               `json:"description"`
+	SystemPrompt      *string               `json:"systemPrompt"`
+	Model             *ModelConfig          `json:"model"`
+	Tools             []string              `json:"tools"`
+	BannedTools       []string              `json:"bannedTools,omitempty"`
+	Skills            []string              `json:"skills"`
+	AutoLoadSkills    *bool                 `json:"autoLoadSkills"`
+	FlowType          *AgentFlowType        `json:"flowType"`
+	IsDefault         *bool                 `json:"isDefault"`
+	Enabled           *bool                 `json:"enabled"`
+	MaxSteps          *int                  `json:"maxSteps"`
+	DefaultTimeout    *int                  `json:"defaultTimeout"`
+	Visibility        *AgentVisibility      `json:"visibility"`
+	DispatchMode      *AgentDispatchMode    `json:"dispatchMode"`
+	ACPConfig         *ACPConfig            `json:"acpConfig"`
+	Config            map[string]any        `json:"config"`
+	SandboxConfig     map[string]any        `json:"workspaceConfig"`
+	ToolPolicies      map[string]ToolPolicy `json:"toolPolicies,omitempty"`
+	DefaultToolPolicy *ToolPolicyDefault    `json:"defaultToolPolicy,omitempty"`
 }
 
 // --- Agent Run Message / Tool Call DTOs ---
@@ -427,30 +430,31 @@ type AgentRunStepDTO struct {
 // ToDTO converts an AgentDefinition entity to AgentDefinitionDTO
 func (d *AgentDefinition) ToDTO() *AgentDefinitionDTO {
 	return &AgentDefinitionDTO{
-		ID:             d.ID,
-		ProductID:      d.ProductID,
-		ProjectID:      d.ProjectID,
-		Name:           d.Name,
-		Description:    d.Description,
-		SystemPrompt:   d.SystemPrompt,
-		Model:          d.Model,
-		Tools:          d.Tools,
-		BannedTools:    d.BannedTools,
-		Skills:         d.Skills,
-		AutoLoadSkills: d.AutoLoadSkills,
-		FlowType:       d.FlowType,
-		IsDefault:      d.IsDefault,
-		Enabled:        d.Enabled,
-		MaxSteps:       d.MaxSteps,
-		DefaultTimeout: d.DefaultTimeout,
-		Visibility:     d.Visibility,
-		DispatchMode:   d.DispatchMode,
-		ACPConfig:      d.ACPConfig,
-		Config:         d.Config,
-		SandboxConfig:  d.SandboxConfig,
-		ToolPolicies:   d.ToolPolicies,
-		CreatedAt:      d.CreatedAt,
-		UpdatedAt:      d.UpdatedAt,
+		ID:                d.ID,
+		ProductID:         d.ProductID,
+		ProjectID:         d.ProjectID,
+		Name:              d.Name,
+		Description:       d.Description,
+		SystemPrompt:      d.SystemPrompt,
+		Model:             d.Model,
+		Tools:             d.Tools,
+		BannedTools:       d.BannedTools,
+		Skills:            d.Skills,
+		AutoLoadSkills:    d.AutoLoadSkills,
+		FlowType:          d.FlowType,
+		IsDefault:         d.IsDefault,
+		Enabled:           d.Enabled,
+		MaxSteps:          d.MaxSteps,
+		DefaultTimeout:    d.DefaultTimeout,
+		Visibility:        d.Visibility,
+		DispatchMode:      d.DispatchMode,
+		ACPConfig:         d.ACPConfig,
+		Config:            d.Config,
+		SandboxConfig:     d.SandboxConfig,
+		ToolPolicies:      d.ToolPolicies,
+		DefaultToolPolicy: d.DefaultToolPolicy,
+		CreatedAt:         d.CreatedAt,
+		UpdatedAt:         d.UpdatedAt,
 	}
 }
 
