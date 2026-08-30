@@ -75,6 +75,20 @@ type BlueprintApplication struct {
 	UpdatedAt   time.Time `bun:"updated_at,notnull,default:now()" json:"updatedAt"`
 }
 
+// BlueprintPackClaim records that a blueprint's apply depends on a schema pack
+// for a project. One row per (blueprint, project, pack); unapply uses it to
+// avoid removing a pack assignment shared with another applied blueprint.
+// Table: kb.blueprint_pack_claims.
+type BlueprintPackClaim struct {
+	bun.BaseModel `bun:"table:kb.blueprint_pack_claims,alias:bpc"`
+
+	ID          string    `bun:"id,pk,type:uuid,default:uuid_generate_v4()" json:"id"`
+	BlueprintID string    `bun:"blueprint_id,notnull,type:uuid" json:"blueprintId"`
+	ProjectID   string    `bun:"project_id,notnull,type:uuid" json:"projectId"`
+	SchemaID    string    `bun:"schema_id,notnull,type:uuid" json:"schemaId"`
+	CreatedAt   time.Time `bun:"created_at,notnull,default:now()" json:"createdAt"`
+}
+
 // AppliedBlueprint is the project-scoped view of an applied blueprint, joined
 // with its blueprint metadata. Returned by GET /api/blueprints/applied.
 type AppliedBlueprint struct {

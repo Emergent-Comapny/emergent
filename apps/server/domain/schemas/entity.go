@@ -183,8 +183,12 @@ type ProjectMemorySchema struct {
 	Active      bool       `bun:"active,notnull,default:true" json:"active"`
 	InstalledAt time.Time  `bun:"installed_at" json:"installedAt"`
 	RemovedAt   *time.Time `bun:"removed_at" json:"removedAt,omitempty"`
-	CreatedAt   time.Time  `bun:"created_at" json:"createdAt"`
-	UpdatedAt   time.Time  `bun:"updated_at" json:"updatedAt"`
+	// SourceBlueprintID records the blueprint that created this assignment
+	// (NULL = assigned outside any blueprint). Unapply uses it to avoid removing
+	// manually-installed or shared pack assignments.
+	SourceBlueprintID *string   `bun:"source_blueprint_id,type:uuid" json:"sourceBlueprintId,omitempty"`
+	CreatedAt         time.Time `bun:"created_at" json:"createdAt"`
+	UpdatedAt         time.Time `bun:"updated_at" json:"updatedAt"`
 
 	// Joined memory schema
 	MemorySchema *GraphMemorySchema `bun:"rel:belongs-to,join:schema_id=id" json:"memorySchema,omitempty"`
@@ -259,6 +263,10 @@ type AssignPackRequest struct {
 	// AutoUninstall, when true, uninstalls the from_version schema after a
 	// successful auto-migration.
 	AutoUninstall bool `json:"auto_uninstall,omitempty"`
+	// SourceBlueprintID, when set, records the blueprint that owns this
+	// assignment. Used by blueprint unapply to avoid removing shared/manual
+	// assignments. Nil for manual assigns.
+	SourceBlueprintID *string `json:"sourceBlueprintId,omitempty"`
 }
 
 // PropertyConflict describes a single property-level conflict during a merge.

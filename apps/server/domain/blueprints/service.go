@@ -287,9 +287,9 @@ func (s *Service) Unapply(ctx context.Context, blueprintID, projectID string) (*
 		return nil, apperror.ErrBadRequest.WithMessage("blueprint manifest is not valid JSON: " + err.Error())
 	}
 
-	// Agents: hard delete by name. Flag drift by comparing the definition's
-	// UpdatedAt against the application's AppliedAt (apply bumps UpdatedAt, so a
-	// later user edit leaves UpdatedAt > AppliedAt).
+	// Agents: delete only definitions this blueprint created (source_blueprint_id
+	// == this blueprint). Pre-existing/manual (nil) and other-blueprint-owned
+	// definitions are skipped. Flag drift on owned definitions edited after apply.
 	if s.agentRepo != nil {
 		for _, am := range manifest.Agents {
 			def, err := s.agentRepo.FindDefinitionByName(ctx, projectID, am.Name)
@@ -298,6 +298,10 @@ func (s *Service) Unapply(ctx context.Context, blueprintID, projectID string) (*
 			}
 			if def == nil {
 				result.Agents.Missing++
+				continue
+			}
+			if def.SourceBlueprintID == nil || *def.SourceBlueprintID != blueprintID {
+				result.Agents.Skipped++
 				continue
 			}
 			if def.UpdatedAt.After(app.AppliedAt) {
@@ -312,16 +316,9 @@ func (s *Service) Unapply(ctx context.Context, blueprintID, projectID string) (*
 		result.Agents.Skipped = len(manifest.Agents)
 	}
 
-	// Packs: soft-delete this project's assignment, leave the global pack.
+	// Packs: remove only assignments this blueprint owns and that no other
+	// applied blueprint still claims. Shared and manual assignments are skipped.
 	if len(manifest.Packs) > 0 {
-		installed, err := s.schemasSvc.GetInstalledPacks(ctx, projectID)
-		if err != nil {
-			return nil, err
-		}
-		assignmentBySchema := make(map[string]string, len(installed))
-		for _, it := range installed {
-			assignmentBySchema[it.SchemaID] = it.ID
-		}
 		for _, p := range manifest.Packs {
 			pack, err := s.schemasRepo.GetPackByNameVersion(ctx, p.Name, p.Version)
 			if err != nil {
@@ -331,19 +328,27 @@ func (s *Service) Unapply(ctx context.Context, blueprintID, projectID string) (*
 				}
 				return nil, err
 			}
-			assignmentID, ok := assignmentBySchema[pack.ID]
-			if !ok {
+			// Release this blueprint's claim first (idempotent).
+			if err := s.repo.DeletePackClaim(ctx, projectID, blueprintID, pack.ID); err != nil {
+				return nil, err
+			}
+			assignment, err := s.schemasRepo.GetActiveAssignment(ctx, projectID, pack.ID)
+			if err != nil {
+				return nil, err
+			}
+			if assignment == nil {
 				result.Packs.Missing++
 				continue
 			}
-			if err := s.schemasSvc.DeleteAssignment(ctx, projectID, assignmentID); err != nil {
-				if isNotFound(err) {
-					result.Packs.Missing++
-					continue
-				}
+			removed, err := s.schemasRepo.DeleteAssignmentIfOwned(ctx, projectID, pack.ID, blueprintID)
+			if err != nil {
 				return nil, err
 			}
-			result.Packs.Removed++
+			if removed {
+				result.Packs.Removed++
+			} else {
+				result.Packs.Skipped++
+			}
 		}
 	}
 
@@ -358,8 +363,9 @@ func (s *Service) Unapply(ctx context.Context, blueprintID, projectID string) (*
 		result.Seed.Skipped = len(manifest.Seed.Objects) + len(manifest.Seed.Relationships)
 	}
 
-	// Mark the application record unapplied last (retry converges).
-	if err := s.repo.MarkUnapplied(ctx, projectID, blueprintID); err != nil {
+	// Mark the application record unapplied last (retry converges). The
+	// applied_at guard detects a concurrent re-apply and returns conflict.
+	if err := s.repo.MarkUnapplied(ctx, projectID, blueprintID, app.AppliedAt); err != nil {
 		return nil, err
 	}
 

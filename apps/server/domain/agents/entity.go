@@ -353,8 +353,12 @@ type AgentDefinition struct {
 	// ToolPolicies maps tool name → policy. When a tool has Confirm:true,
 	// the executor pauses the run and asks the user before executing the tool.
 	ToolPolicies map[string]ToolPolicy `bun:"tool_policies,type:jsonb,default:'{}'" json:"toolPolicies,omitempty"`
-	CreatedAt    time.Time             `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"createdAt"`
-	UpdatedAt    time.Time             `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updatedAt"`
+	// SourceBlueprintID is the ID of the blueprint that created this definition
+	// (NULL for manual/pre-existing definitions). Unapply uses it to delete only
+	// agents the blueprint actually created.
+	SourceBlueprintID *string   `bun:"source_blueprint_id,type:uuid" json:"sourceBlueprintId,omitempty"`
+	CreatedAt         time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"createdAt"`
+	UpdatedAt         time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updatedAt"`
 }
 
 // AgentRunMessage stores a single LLM message exchanged during an agent run.

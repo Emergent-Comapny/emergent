@@ -271,11 +271,15 @@ func (r *Repository) GetApplication(ctx context.Context, projectID, blueprintID 
 
 // MarkUnapplied flips an application record to status 'unapplied'. Called last
 // in Unapply so a mid-unapply crash leaves the record 'applied' and retryable.
-func (r *Repository) MarkUnapplied(ctx context.Context, projectID, blueprintID string) error {
+// The applied_at guard prevents a stale unapply from overwriting a concurrent
+// re-apply (which bumps applied_at).
+func (r *Repository) MarkUnapplied(ctx context.Context, projectID, blueprintID string, appliedAt time.Time) error {
 	result, err := r.db.NewUpdate().
 		Model((*BlueprintApplication)(nil)).
 		Where("project_id = ?", projectID).
 		Where("blueprint_id = ?", blueprintID).
+		Where("status = ?", "applied").
+		Where("applied_at = ?", appliedAt).
 		Set("status = ?", "unapplied").
 		Set("updated_at = ?", time.Now()).
 		Exec(ctx)
@@ -285,7 +289,37 @@ func (r *Repository) MarkUnapplied(ctx context.Context, projectID, blueprintID s
 	}
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		return apperror.ErrNotFound.WithMessage("blueprint application not found")
+		return apperror.ErrConflict.WithMessage("blueprint application changed concurrently; retry unapply")
+	}
+	return nil
+}
+
+// AddPackClaim records that a blueprint's apply depends on a schema pack for a
+// project. Idempotent (INSERT ... ON CONFLICT DO NOTHING) so re-applies and
+// retries converge.
+func (r *Repository) AddPackClaim(ctx context.Context, blueprintID, projectID, schemaID string) error {
+	_, err := r.db.NewInsert().
+		Model(&BlueprintPackClaim{BlueprintID: blueprintID, ProjectID: projectID, SchemaID: schemaID}).
+		On("CONFLICT (project_id, blueprint_id, schema_id) DO NOTHING").
+		Exec(ctx)
+	if err != nil {
+		r.log.Error("failed to add pack claim", logger.Error(err))
+		return apperror.ErrDatabase.WithInternal(err)
+	}
+	return nil
+}
+
+// DeletePackClaim removes a blueprint's pack claim for a project. Idempotent.
+func (r *Repository) DeletePackClaim(ctx context.Context, projectID, blueprintID, schemaID string) error {
+	_, err := r.db.NewDelete().
+		Model((*BlueprintPackClaim)(nil)).
+		Where("project_id = ?", projectID).
+		Where("blueprint_id = ?", blueprintID).
+		Where("schema_id = ?", schemaID).
+		Exec(ctx)
+	if err != nil {
+		r.log.Error("failed to delete pack claim", logger.Error(err))
+		return apperror.ErrDatabase.WithInternal(err)
 	}
 	return nil
 }
