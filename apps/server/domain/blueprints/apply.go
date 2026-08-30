@@ -141,6 +141,7 @@ func (s *Service) applyPacks(ctx context.Context, projectID, userID string, pack
 				Version:                      p.Version,
 				Description:                  &p.Description,
 				Author:                       &p.Author,
+				Migrations:                   p.Migrations,
 				ObjectTypeSchemasSnake:       objectTypes,
 				RelationshipTypeSchemasSnake: relationshipTypes,
 			})
@@ -165,9 +166,10 @@ func (s *Service) applyPacks(ctx context.Context, projectID, userID string, pack
 
 // applyAgents creates or updates agent definitions by name within the project.
 // The update path mutates the EXISTING definition in place, overwriting only
-// manifest-driven fields and preserving unmanaged fields (BannedTools,
-// AutoLoadSkills, MaxSessionEvents, ACPConfig, ProductID, Enabled, ID, and
-// timestamps). Requires the agents repository to be wired via SetAgentRepo;
+// manifest-driven fields and preserving unmanaged fields (AutoLoadSkills,
+// MaxSessionEvents, ACPConfig, ProductID, Enabled, ID, and timestamps).
+// BannedTools is manifest-driven on create and preserve-when-omitted on
+// update. Requires the agents repository to be wired via SetAgentRepo;
 // otherwise the step is skipped with a warning and all entries counted as
 // skipped.
 func (s *Service) applyAgents(ctx context.Context, projectID string, agentManifests []AgentManifest) (ApplyCounts, error) {
@@ -415,6 +417,7 @@ func buildAgentDefinition(m *AgentManifest, projectID string) *agents.AgentDefin
 		ProjectID:      projectID,
 		Name:           m.Name,
 		Tools:          m.Tools,
+		BannedTools:    m.BannedTools,
 		Skills:         m.Skills,
 		FlowType:       flowType,
 		Enabled:        true,
@@ -430,6 +433,9 @@ func buildAgentDefinition(m *AgentManifest, projectID string) *agents.AgentDefin
 	}
 	if def.Tools == nil {
 		def.Tools = []string{}
+	}
+	if def.BannedTools == nil {
+		def.BannedTools = []string{}
 	}
 	if def.Skills == nil {
 		def.Skills = []string{}
@@ -465,12 +471,15 @@ func buildAgentDefinition(m *AgentManifest, projectID string) *agents.AgentDefin
 
 // applyAgentManifestToExisting overwrites ONLY the manifest-driven fields on an
 // existing agent definition for the UPDATE path. Everything not driven by the
-// manifest — BannedTools, AutoLoadSkills, MaxSessionEvents, ACPConfig,
-// ProductID, Enabled, ID, timestamps, and Name — is preserved untouched.
+// manifest — AutoLoadSkills, MaxSessionEvents, ACPConfig, ProductID, Enabled,
+// ID, timestamps, and Name — is preserved untouched.
 // Description/SystemPrompt/FlowType/Visibility/DispatchMode are only set when
 // the manifest provides a non-empty value (omitted = keep current); Tools,
 // Skills, Config, SandboxConfig, IsDefault, MaxSteps, DefaultTimeout, and
-// ToolPolicies are overwritten from the manifest. Enabled is never set here.
+// ToolPolicies are overwritten from the manifest. BannedTools is applied only
+// when the manifest provides a non-empty list (preserve-when-omitted), so a
+// user's manual banned-tool edits survive a re-apply that omits the field.
+// Enabled is never set here.
 func applyAgentManifestToExisting(def *agents.AgentDefinition, m *AgentManifest) {
 	if m.Description != "" {
 		def.Description = &m.Description
@@ -489,6 +498,9 @@ func applyAgentManifestToExisting(def *agents.AgentDefinition, m *AgentManifest)
 	def.Tools = m.Tools
 	if def.Tools == nil {
 		def.Tools = []string{}
+	}
+	if len(m.BannedTools) > 0 {
+		def.BannedTools = m.BannedTools
 	}
 	def.Skills = m.Skills
 	if def.Skills == nil {
