@@ -47,6 +47,7 @@ func TestApply_AgentMaterialization_NonDestructiveUpdate(t *testing.T) {
 				Description:  "apply test agent",
 				SystemPrompt: prompt,
 				Tools:        []string{"skill-list"},
+				BannedTools:  []string{"memory-wipe"},
 			}},
 		})
 		require.NoError(t, err)
@@ -75,6 +76,7 @@ func TestApply_AgentMaterialization_NonDestructiveUpdate(t *testing.T) {
 	require.NotNil(t, def, "agent definition must exist after apply")
 	assert.Equal(t, "hi", derefString(def.SystemPrompt))
 	assert.True(t, def.Enabled, "new agents must default to enabled")
+	assert.Equal(t, []string{"memory-wipe"}, def.BannedTools, "bannedTools must be applied on create")
 
 	// Simulate a runtime change: disable the agent behind the blueprint's back.
 	def.Enabled = false
@@ -106,4 +108,19 @@ func derefString(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// TestApplyAgentManifestToExisting_BannedTools verifies bannedTools is
+// preserve-when-omitted on the update path: a manifest that omits the field
+// keeps the user's existing value, while a manifest that provides it overwrites.
+func TestApplyAgentManifestToExisting_BannedTools(t *testing.T) {
+	def := &agents.AgentDefinition{BannedTools: []string{"user-set"}}
+
+	// Omitted -> preserve user's value.
+	applyAgentManifestToExisting(def, &AgentManifest{Name: "x"})
+	assert.Equal(t, []string{"user-set"}, def.BannedTools)
+
+	// Provided -> overwrite from manifest.
+	applyAgentManifestToExisting(def, &AgentManifest{Name: "x", BannedTools: []string{"blueprint-set"}})
+	assert.Equal(t, []string{"blueprint-set"}, def.BannedTools)
 }

@@ -1,5 +1,7 @@
 package blueprints
 
+import "github.com/emergent-company/emergent.memory/domain/schemas"
+
 // BlueprintManifest is the typed shape of a blueprint's opaque manifest JSON.
 // Packs, agents, and skills are materialized with create-or-update (by name)
 // semantics; seed objects/relationships are created idempotently.
@@ -18,12 +20,13 @@ type ProjectManifest struct {
 
 // PackManifest describes a schema pack to create and assign.
 type PackManifest struct {
-	Name              string                `json:"name"`
-	Version           string                `json:"version"`
-	Description       string                `json:"description"`
-	Author            string                `json:"author"`
-	ObjectTypes       []ObjectTypeDef       `json:"objectTypes,omitempty"`
-	RelationshipTypes []RelationshipTypeDef `json:"relationshipTypes,omitempty"`
+	Name              string                       `json:"name"`
+	Version           string                       `json:"version"`
+	Description       string                       `json:"description"`
+	Author            string                       `json:"author"`
+	Migrations        *schemas.SchemaMigrationHints `json:"migrations,omitempty"`
+	ObjectTypes       []ObjectTypeDef              `json:"objectTypes,omitempty"`
+	RelationshipTypes []RelationshipTypeDef        `json:"relationshipTypes,omitempty"`
 }
 
 // ObjectTypeDef is a single object type schema in a pack manifest. Labels,
@@ -60,6 +63,7 @@ type AgentManifest struct {
 	SystemPrompt    string                     `json:"systemPrompt"`
 	Model           *AgentModelManifest        `json:"model,omitempty"`
 	Tools           []string                   `json:"tools,omitempty"`
+	BannedTools     []string                   `json:"bannedTools,omitempty"`
 	Skills          []string                   `json:"skills,omitempty"`
 	FlowType        string                     `json:"flowType,omitempty"`
 	IsDefault       *bool                      `json:"isDefault,omitempty"`
