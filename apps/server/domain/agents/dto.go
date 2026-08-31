@@ -338,6 +338,7 @@ type AgentDefinitionSummaryDTO struct {
 	IsDefault        bool            `json:"isDefault"`
 	Enabled          bool            `json:"enabled"`
 	ToolCount        int             `json:"toolCount"`
+	Skills           []string        `json:"skills"`
 	HasSandboxConfig bool            `json:"hasSandboxConfig"`
 	CreatedAt        time.Time       `json:"createdAt"`
 	UpdatedAt        time.Time       `json:"updatedAt"`
@@ -470,6 +471,7 @@ func (d *AgentDefinition) ToSummaryDTO() *AgentDefinitionSummaryDTO {
 		IsDefault:        d.IsDefault,
 		Enabled:          d.Enabled,
 		ToolCount:        len(d.Tools),
+		Skills:           d.Skills,
 		HasSandboxConfig: len(d.SandboxConfig) > 0,
 		CreatedAt:        d.CreatedAt,
 		UpdatedAt:        d.UpdatedAt,
