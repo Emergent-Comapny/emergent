@@ -209,6 +209,26 @@ func (r *Repository) RecordApplication(ctx context.Context, app *BlueprintApplic
 	return nil
 }
 
+// SupersedeApplications marks any other application of the same blueprint name
+// (a different blueprint_id) in the project as 'superseded'. Called on apply so
+// an upgrade (a new version) replaces the previous application instead of
+// leaving both listed as applied.
+func (r *Repository) SupersedeApplications(ctx context.Context, projectID, blueprintID, name string) error {
+	_, err := r.db.NewUpdate().
+		Model((*BlueprintApplication)(nil)).
+		Where("project_id = ?", projectID).
+		Where("blueprint_id <> ?", blueprintID).
+		Where("blueprint_id IN (SELECT id FROM kb.blueprints WHERE name = ?)", name).
+		Set("status = ?", "superseded").
+		Set("updated_at = ?", time.Now()).
+		Exec(ctx)
+	if err != nil {
+		r.log.Error("failed to supersede blueprint applications", logger.Error(err))
+		return apperror.ErrDatabase.WithInternal(err)
+	}
+	return nil
+}
+
 // ListApplied returns the blueprints applied to a project, joined with their
 // blueprint metadata, ordered by name.
 func (r *Repository) ListApplied(ctx context.Context, projectID string) ([]AppliedBlueprint, error) {

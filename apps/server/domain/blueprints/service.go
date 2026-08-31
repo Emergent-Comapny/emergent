@@ -235,7 +235,7 @@ func (s *Service) recordApplication(ctx context.Context, bp *Blueprint, projectI
 	if userID != "" {
 		appliedBy = &userID
 	}
-	return s.repo.RecordApplication(ctx, &BlueprintApplication{
+	if err := s.repo.RecordApplication(ctx, &BlueprintApplication{
 		BlueprintID: bp.ID,
 		ProjectID:   projectID,
 		Version:     bp.Version,
@@ -244,7 +244,12 @@ func (s *Service) recordApplication(ctx context.Context, bp *Blueprint, projectI
 		Status:      "applied",
 		AppliedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
-	})
+	}); err != nil {
+		return err
+	}
+	// An upgrade applies a new version of the same name; supersede the previous
+	// application so ListApplied shows only the latest.
+	return s.repo.SupersedeApplications(ctx, projectID, bp.ID, bp.Name)
 }
 
 // Unapply reverses an apply for a project: it hard-deletes the blueprint's
