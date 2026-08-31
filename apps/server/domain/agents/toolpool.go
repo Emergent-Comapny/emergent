@@ -767,12 +767,22 @@ func convertToolResult(result *mcp.ToolResult) (map[string]any, error) {
 			// Try to parse as JSON first. Preserve a tool-provided "ok" field
 			// (e.g. entity-create's ok=failed==0); otherwise add a uniform
 			// ok=true so consumers can classify success generically.
-			var parsed map[string]any
+			var parsed any
 			if err := json.Unmarshal([]byte(textParts[0]), &parsed); err == nil {
-				if _, has := parsed["ok"]; !has {
-					parsed["ok"] = true
+				if m, ok := parsed.(map[string]any); ok {
+					// Object result: return it directly (flattened), injecting
+					// ok=true when absent. Preserves the existing shape.
+					if _, has := m["ok"]; !has {
+						m["ok"] = true
+					}
+					return m, nil
 				}
-				return parsed, nil
+				// Array or scalar result: wrap the decoded value so consumers
+				// receive structured data, not a re-encoded JSON string.
+				// Previously unmarshalling into a map failed for top-level
+				// arrays (e.g. agent-def-list) and fell through to the
+				// escaped-string path below.
+				return map[string]any{"ok": true, "result": parsed}, nil
 			}
 			return map[string]any{"ok": true, "result": textParts[0]}, nil
 		}
