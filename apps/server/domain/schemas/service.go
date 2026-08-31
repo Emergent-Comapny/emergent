@@ -453,6 +453,7 @@ func (s *Service) PreviewSchemaMigration(ctx context.Context, projectID string, 
 		ProjectID:    projectID,
 		FromSchemaID: req.FromSchemaID,
 		ToSchemaID:   req.ToSchemaID,
+		Plan:         buildMigrationPlan(fromObjSchemas, toObjSchemas, hints),
 	}
 
 	overallRisk := graph.RiskLevelSafe
@@ -480,8 +481,10 @@ func (s *Service) PreviewSchemaMigration(ctx context.Context, projectID string, 
 		}
 
 		typeRisk := graph.RiskLevelSafe
+		var results []*graph.MigrationResult
 		for _, obj := range objs {
 			result := migrator.MigrateObject(ctx, obj, fromSchema, toSchema, req.FromSchemaID, req.ToSchemaID)
+			results = append(results, result)
 			if riskWeight(result.RiskLevel) > riskWeight(typeRisk) {
 				typeRisk = result.RiskLevel
 			}
@@ -490,6 +493,7 @@ func (s *Service) PreviewSchemaMigration(ctx context.Context, projectID string, 
 				typeResult.BlockReason = result.BlockReason
 			}
 		}
+		aggregateMigrationProps(typeResult, results)
 		if len(objs) > 0 && typeResult.BlockReason == "" {
 			typeResult.CanProceed = true
 		}
@@ -514,6 +518,76 @@ func (s *Service) PreviewSchemaMigration(ctx context.Context, projectID string, 
 	}
 
 	return resp, nil
+}
+
+// buildMigrationPlan derives a structured dry-run plan from the from/to object
+// schemas and any migration hints. Hints are authoritative for type/property
+// renames and declared removals; added types and added properties are computed
+// from the schema diff. Types that arrive via a hint type_rename are reported
+// as renames (not added types), and properties of brand-new types are reported
+// via AddedTypes only (not duplicated into AddedProperties).
+func buildMigrationPlan(fromObjSchemas, toObjSchemas map[string]*agents.ObjectSchema, hints *SchemaMigrationHints) *SchemaMigrationPlan {
+	plan := &SchemaMigrationPlan{}
+
+	if hints != nil {
+		plan.TypeRenames = hints.TypeRenames
+		plan.PropertyRenames = hints.PropertyRenames
+		plan.RemovedProperties = hints.RemovedProperties
+	}
+
+	renameTargets := map[string]bool{}
+	for _, tr := range plan.TypeRenames {
+		renameTargets[tr.To] = true
+	}
+
+	for typeName := range toObjSchemas {
+		if renameTargets[typeName] {
+			continue // type arrives via a rename — reported under type_renames
+		}
+		if _, ok := fromObjSchemas[typeName]; !ok {
+			plan.AddedTypes = append(plan.AddedTypes, typeName)
+		}
+	}
+
+	for typeName, toSchema := range toObjSchemas {
+		fromSchema := fromObjSchemas[typeName]
+		if fromSchema == nil {
+			continue // brand-new type — its props are covered by AddedTypes
+		}
+		for propName := range toSchema.Properties {
+			if _, ok := fromSchema.Properties[propName]; !ok {
+				plan.AddedProperties = append(plan.AddedProperties, AddedProperty{TypeName: typeName, Name: propName})
+			}
+		}
+	}
+
+	return plan
+}
+
+// aggregateMigrationProps unions and dedupes per-object migration results into
+// the per-type prop summaries (migrated/dropped/added/coerced).
+func aggregateMigrationProps(typeResult *MigrationTypeResult, results []*graph.MigrationResult) {
+	for _, r := range results {
+		typeResult.MigratedProps = unionStrings(typeResult.MigratedProps, r.MigratedProps)
+		typeResult.DroppedProps = unionStrings(typeResult.DroppedProps, r.DroppedProps)
+		typeResult.AddedProps = unionStrings(typeResult.AddedProps, r.AddedProps)
+		typeResult.CoercedProps = unionStrings(typeResult.CoercedProps, r.CoercedProps)
+	}
+}
+
+// unionStrings appends items to dst, skipping values already present.
+func unionStrings(dst, items []string) []string {
+	seen := make(map[string]bool, len(dst)+len(items))
+	for _, s := range dst {
+		seen[s] = true
+	}
+	for _, s := range items {
+		if !seen[s] {
+			dst = append(dst, s)
+			seen[s] = true
+		}
+	}
+	return dst
 }
 
 // ExecuteSchemaMigration runs rename SQL and then migrates all affected objects,

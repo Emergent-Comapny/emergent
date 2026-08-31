@@ -82,8 +82,30 @@ type SchemaMigrationPreviewResponse struct {
 	CanProceed     bool                  `json:"can_proceed"`
 	BlockReason    string                `json:"block_reason,omitempty"`
 	TotalObjects   int                   `json:"total_objects"`
+	Plan           *SchemaMigrationPlan  `json:"plan,omitempty"`
 	PerTypeResults []MigrationTypeResult `json:"per_type_results,omitempty"`
-	SuggestedHints string                `json:"suggested_hints_yaml,omitempty"`
+}
+
+// SchemaMigrationPlan is a structured dry-run report of what a migration will do.
+// It lets a client render an exact preview: which types are renamed/added and
+// which properties are renamed/dropped/added per type.
+type SchemaMigrationPlan struct {
+	// TypeRenames lists object/relationship type renames to apply (from hints).
+	TypeRenames []TypeRename `json:"type_renames,omitempty"`
+	// PropertyRenames lists property renames within types (from hints).
+	PropertyRenames []PropertyRename `json:"property_renames,omitempty"`
+	// RemovedProperties lists properties that are intentionally dropped (from hints).
+	RemovedProperties []RemovedProperty `json:"removed_properties,omitempty"`
+	// AddedTypes lists type names present in the target schema but not the source.
+	AddedTypes []string `json:"added_types,omitempty"`
+	// AddedProperties lists properties added to existing types (target prop not in source).
+	AddedProperties []AddedProperty `json:"added_properties,omitempty"`
+}
+
+// AddedProperty identifies a property added to a type in a migration.
+type AddedProperty struct {
+	TypeName string `json:"type_name"`
+	Name     string `json:"name"`
 }
 
 // MigrationTypeResult summarises migration risk for a single type.
@@ -93,6 +115,14 @@ type MigrationTypeResult struct {
 	RiskLevel   string `json:"risk_level"`
 	CanProceed  bool   `json:"can_proceed"`
 	BlockReason string `json:"block_reason,omitempty"`
+	// MigratedProps lists props carried over unchanged (union across objects, deduped).
+	MigratedProps []string `json:"migrated_props,omitempty"`
+	// DroppedProps lists props present in the old schema but absent from the new one.
+	DroppedProps []string `json:"dropped_props,omitempty"`
+	// AddedProps lists props present in the new schema but absent from existing objects.
+	AddedProps []string `json:"added_props,omitempty"`
+	// CoercedProps lists props whose values need type coercion.
+	CoercedProps []string `json:"coerced_props,omitempty"`
 }
 
 // SchemaMigrationExecuteRequest is the request to execute a migration.

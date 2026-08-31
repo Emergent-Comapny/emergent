@@ -635,14 +635,48 @@ type TypeMigrationRisk struct {
 	DroppedFields int    `json:"dropped_fields,omitempty"`
 }
 
+// SchemaMigrationPlan is a structured dry-run report of what a migration will do.
+type SchemaMigrationPlan struct {
+	TypeRenames       []TypeRename      `json:"type_renames,omitempty"`
+	PropertyRenames   []PropertyRename  `json:"property_renames,omitempty"`
+	RemovedProperties []RemovedProperty `json:"removed_properties,omitempty"`
+	AddedTypes        []string          `json:"added_types,omitempty"`
+	AddedProperties   []AddedProperty   `json:"added_properties,omitempty"`
+}
+
+// AddedProperty identifies a property added to a type in a migration plan.
+type AddedProperty struct {
+	TypeName string `json:"type_name"`
+	Name     string `json:"name"`
+}
+
+// MigrationTypeResult summarises migration impact for a single type.
+type MigrationTypeResult struct {
+	TypeName      string   `json:"type_name"`
+	ObjectCount   int      `json:"object_count"`
+	RiskLevel     string   `json:"risk_level"`
+	CanProceed    bool     `json:"can_proceed"`
+	BlockReason   string   `json:"block_reason,omitempty"`
+	MigratedProps []string `json:"migrated_props,omitempty"`
+	DroppedProps  []string `json:"dropped_props,omitempty"`
+	AddedProps    []string `json:"added_props,omitempty"`
+	CoercedProps  []string `json:"coerced_props,omitempty"`
+}
+
 // SchemaMigrationPreviewResponse is returned from POST .../migrate/preview.
 type SchemaMigrationPreviewResponse struct {
-	ProjectID        string              `json:"project_id"`
-	FromSchemaID     string              `json:"from_schema_id"`
-	ToSchemaID       string              `json:"to_schema_id"`
-	TotalObjects     int                 `json:"total_objects"`
-	OverallRiskLevel string              `json:"overall_risk_level"`
-	TypeBreakdown    []TypeMigrationRisk `json:"type_breakdown,omitempty"`
+	ProjectID        string                `json:"project_id"`
+	FromSchemaID     string                `json:"from_schema_id"`
+	ToSchemaID       string                `json:"to_schema_id"`
+	OverallRiskLevel string                `json:"overall_risk_level"`
+	CanProceed       bool                  `json:"can_proceed"`
+	BlockReason      string                `json:"block_reason,omitempty"`
+	TotalObjects     int                   `json:"total_objects"`
+	Plan             *SchemaMigrationPlan  `json:"plan,omitempty"`
+	PerTypeResults   []MigrationTypeResult `json:"per_type_results,omitempty"`
+	// TypeBreakdown is deprecated and never populated by the server; prefer
+	// PerTypeResults. Kept for backward compatibility with existing CLI consumers.
+	TypeBreakdown []TypeMigrationRisk `json:"type_breakdown,omitempty"`
 }
 
 // SchemaMigrationExecuteRequest is sent to POST .../migrate/execute.
