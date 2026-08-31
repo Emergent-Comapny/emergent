@@ -2,11 +2,16 @@ package adk
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
 	"github.com/emergent-company/emergent.memory/internal/config"
+	"google.golang.org/adk/model"
 	"google.golang.org/genai"
 )
 
@@ -529,5 +534,48 @@ func TestBuildMessages_DeepSeekReasoningEcho(t *testing.T) {
 	}
 	if msgs[0].ReasoningContent != nil {
 		t.Errorf("non-deepseek assistant tool turn: ReasoningContent = %v, want nil", msgs[0].ReasoningContent)
+	}
+}
+
+// TestGenerateContent_DeepSeekDisablesThinking verifies that a DeepSeek model
+// with tools present sends `thinking: {"type": "disabled"}` (not the vLLM-only
+// chat_template_kwargs knob) so DeepSeek doesn't enter thinking mode and then
+// reject follow-up turns for missing reasoning_content.
+func TestGenerateContent_DeepSeekDisablesThinking(t *testing.T) {
+	var captured map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &captured)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer srv.Close()
+
+	m := NewOpenAICompatibleModel(srv.URL, "test-key", "deepseek-v4-pro")
+
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{genai.NewContentFromText("hi", genai.RoleUser)},
+		Config: &genai.GenerateContentConfig{
+			Tools: []*genai.Tool{
+				{FunctionDeclarations: []*genai.FunctionDeclaration{{Name: "web-fetch"}}},
+			},
+		},
+	}
+
+	for _, err := range m.GenerateContent(context.Background(), req, false) {
+		if err != nil {
+			t.Fatalf("GenerateContent returned error: %v", err)
+		}
+	}
+
+	thinking, ok := captured["thinking"].(map[string]any)
+	if !ok {
+		t.Fatalf("request body missing thinking field; body=%v", captured)
+	}
+	if thinking["type"] != "disabled" {
+		t.Errorf("thinking.type = %v, want disabled", thinking["type"])
+	}
+	if _, hasKwargs := captured["chat_template_kwargs"]; hasKwargs {
+		t.Errorf("deepseek request should not set chat_template_kwargs; body=%v", captured)
 	}
 }

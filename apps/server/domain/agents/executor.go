@@ -1059,13 +1059,13 @@ func (ae *AgentExecutor) injectToolResponse(ctx context.Context, rootRunID, proj
 		})
 	}
 
-	// ADK convention: author = agent name, role = "user". A tool-name author or
-	// "tool" role is treated as foreign and textualized, breaking pairing.
+	// ADK convention: the event author must equal the ADK agent name (which is
+	// sanitized), else the event is treated as a foreign reply, textualized, and
+	// the function-response rearrange is skipped — leaving a synthetic
+	// reasoning-less assistant turn that DeepSeek thinking-mode rejects.
 	author := "user"
-	if req.AgentDefinition != nil && req.AgentDefinition.Name != "" {
-		author = req.AgentDefinition.Name
-	} else if req.Agent != nil && req.Agent.Name != "" {
-		author = req.Agent.Name
+	if name := ae.resolveAgentName(*req); name != "" {
+		author = sanitizeAgentName(name)
 	}
 
 	content := &genai.Content{
@@ -1073,11 +1073,10 @@ func (ae *AgentExecutor) injectToolResponse(ctx context.Context, rootRunID, proj
 		Parts: parts,
 	}
 
-	event := &session.Event{
-		Author: author,
-		LLMResponse: model.LLMResponse{
-			Content: content,
-		},
+	event := session.NewEvent("")
+	event.Author = author
+	event.LLMResponse = model.LLMResponse{
+		Content: content,
 	}
 
 	if appendErr := ae.sessionService.AppendEvent(ctx, getResp.Session, event); appendErr != nil {

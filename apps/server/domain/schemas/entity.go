@@ -56,7 +56,7 @@ type SchemaMigrationJob struct {
 	ObjectsMigrated int            `bun:"objects_migrated,notnull,default:0" json:"objects_migrated"`
 	ObjectsFailed   int            `bun:"objects_failed,notnull,default:0" json:"objects_failed"`
 	Error           *string        `bun:"error" json:"error,omitempty"`
-	AutoUninstall   bool           `bun:"-" json:"auto_uninstall,omitempty"` // runtime-only flag
+	AutoUninstall   bool           `bun:"auto_uninstall,notnull,default:false" json:"auto_uninstall,omitempty"`
 	CreatedAt       time.Time      `bun:"created_at,notnull" json:"created_at"`
 	StartedAt       *time.Time     `bun:"started_at" json:"started_at,omitempty"`
 	CompletedAt     *time.Time     `bun:"completed_at" json:"completed_at,omitempty"`

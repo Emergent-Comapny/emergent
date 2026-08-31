@@ -1186,15 +1186,17 @@ func (r *Repository) GetPackByNameVersion(ctx context.Context, name, version str
 // Task 4.3.
 func (r *Repository) GetInstalledSchemasByName(ctx context.Context, projectID, schemaName string) ([]GraphMemorySchema, error) {
 	var packs []GraphMemorySchema
-	err := r.db.NewRaw(`
-		SELECT gs.*
-		FROM kb.graph_schemas gs
-		JOIN kb.project_schemas ps ON ps.schema_id = gs.id
-		WHERE ps.project_id = ?
-		  AND ps.removed_at IS NULL
-		  AND gs.name = ?
-		ORDER BY ps.installed_at DESC
-	`, projectID, schemaName).Scan(ctx, &packs)
+	// Use Model(&packs) so only the struct's mapped columns are selected —
+	// graph_schemas has extra columns (e.g. discovery_job_id) not mapped on
+	// GraphMemorySchema, which a SELECT gs.* would fail to scan.
+	err := r.db.NewSelect().
+		Model(&packs).
+		Join("JOIN kb.project_schemas AS ps ON ps.schema_id = gtp.id").
+		Where("ps.project_id = ?", projectID).
+		Where("ps.removed_at IS NULL").
+		Where("gtp.name = ?", schemaName).
+		Order("ps.installed_at DESC").
+		Scan(ctx)
 	if err != nil {
 		r.log.Error("failed to get installed schemas by name", logger.Error(err))
 		return nil, apperror.ErrDatabase.WithInternal(err)
@@ -1227,13 +1229,13 @@ func (r *Repository) CreateMigrationJob(ctx context.Context, job *SchemaMigratio
 	err = r.db.NewRaw(`
 		INSERT INTO kb.schema_migration_jobs
 		(project_id, from_schema_id, to_schema_id, chain, status, risk_level,
-		 objects_migrated, objects_failed, created_at)
+		 objects_migrated, objects_failed, auto_uninstall, created_at)
 		VALUES (uuid(?), uuid(?), uuid(?), ?, ?, ?,
-		        ?, ?, ?)
+		        ?, ?, ?, ?)
 		RETURNING id
 	`, job.ProjectID, job.FromSchemaID, job.ToSchemaID, string(chainJSON),
 		job.Status, job.RiskLevel,
-		job.ObjectsMigrated, job.ObjectsFailed, job.CreatedAt).
+		job.ObjectsMigrated, job.ObjectsFailed, job.AutoUninstall, job.CreatedAt).
 		Scan(ctx, &job.ID)
 	if err != nil {
 		r.log.Error("failed to create migration job", logger.Error(err))
