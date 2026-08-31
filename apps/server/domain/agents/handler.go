@@ -2778,6 +2778,16 @@ func (h *Handler) HandleRespondToQuestion(c echo.Context) error {
 					_ = h.repo.ReopenQuestion(c.Request().Context(), questionID)
 					return apperror.NewInternal("failed to record decision", markErr)
 				}
+				if resumeNow {
+					// Re-fetch the run so Resume reads the updated suspend_context
+					// (decisions persisted), not the stale in-memory copy.
+					fresh, ferr := h.repo.FindRunByID(c.Request().Context(), run.ID)
+					if ferr != nil || fresh == nil {
+						_ = h.repo.ReopenQuestion(c.Request().Context(), questionID)
+						return apperror.NewInternal("failed to re-fetch run after decision", ferr)
+					}
+					run = fresh
+				}
 			}
 		} else {
 			userMessage = fmt.Sprintf(
@@ -2971,6 +2981,14 @@ func (h *Handler) HandleCancelQuestion(c echo.Context) error {
 			if markErr != nil {
 				_ = h.repo.ReopenQuestion(c.Request().Context(), questionID)
 				return apperror.NewInternal("failed to record decision", markErr)
+			}
+			if resumeNow {
+				fresh, ferr := h.repo.FindRunByID(c.Request().Context(), run.ID)
+				if ferr != nil || fresh == nil {
+					_ = h.repo.ReopenQuestion(c.Request().Context(), questionID)
+					return apperror.NewInternal("failed to re-fetch run after decision", ferr)
+				}
+				run = fresh
 			}
 		}
 
