@@ -810,9 +810,16 @@ func (ae *AgentExecutor) Resume(ctx context.Context, priorRun *AgentRun, req Exe
 		}
 	}
 
-	// Establish root_run_id for resumed runs: inherit from caller or default to own ID.
+	// Establish root_run_id for resumed runs: inherit the caller's override if
+	// set, otherwise inherit the prior run's root so the whole resume chain
+	// shares a single root. Only fall back to the new run's own ID when the
+	// prior run has no root (e.g. a legacy run that predates root_run_id).
 	if req.RootRunID == nil {
-		req.RootRunID = &newRun.ID
+		if priorRun.RootRunID != nil && *priorRun.RootRunID != "" {
+			req.RootRunID = priorRun.RootRunID
+		} else {
+			req.RootRunID = &newRun.ID
+		}
 	}
 
 	// Persist root_run_id on the resumed run row. trace_id is omitted here since
