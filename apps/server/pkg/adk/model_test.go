@@ -489,6 +489,54 @@ func TestIsDeepSeekModel(t *testing.T) {
 	}
 }
 
+// TestBuildMessages_DeepSeekReasoningEcho verifies that DeepSeek assistant
+// messages always carry reasoning_content (even empty), while non-DeepSeek
+// models omit it — matching opencode's unconditional-echo invariant.
+func TestBuildMessages_DeepSeekReasoningEcho(t *testing.T) {
+	toolCall := func(id string) *genai.Part {
+		return &genai.Part{
+			FunctionCall: &genai.FunctionCall{ID: id, Name: "web-fetch", Args: map[string]any{"url": "https://example.com"}},
+		}
+	}
+	thought := func(text string) *genai.Part {
+		return &genai.Part{Text: text, Thought: true}
+	}
+
+	// DeepSeek: tool-call turn with no reasoning must still carry empty reasoning_content.
+	// (ensureToolCallResponsePairs appends a synthetic tool response, so there are 2 messages.)
+	msgs := buildMessages([]*genai.Content{{Role: "model", Parts: []*genai.Part{toolCall("call_1")}}}, true)
+	if len(msgs) < 1 {
+		t.Fatal("got no messages, want at least the assistant message")
+	}
+	if msgs[0].Role != "assistant" {
+		t.Fatalf("first message role = %q, want assistant", msgs[0].Role)
+	}
+	if msgs[0].ReasoningContent == nil {
+		t.Fatal("deepseek assistant tool turn: ReasoningContent is nil, want empty string")
+	}
+	if *msgs[0].ReasoningContent != "" {
+		t.Errorf("deepseek assistant tool turn: reasoning_content = %q, want empty", *msgs[0].ReasoningContent)
+	}
+
+	// DeepSeek: reasoning turn must carry the reasoning text.
+	msgs = buildMessages([]*genai.Content{{Role: "model", Parts: []*genai.Part{thought("thinking here"), {Text: "final answer"}}}}, true)
+	if len(msgs) != 1 {
+		t.Fatalf("got %d messages, want 1", len(msgs))
+	}
+	if msgs[0].ReasoningContent == nil || *msgs[0].ReasoningContent != "thinking here" {
+		t.Errorf("deepseek assistant reasoning turn: reasoning_content = %v, want %q", msgs[0].ReasoningContent, "thinking here")
+	}
+
+	// Non-DeepSeek: tool-call turn omits reasoning_content.
+	msgs = buildMessages([]*genai.Content{{Role: "model", Parts: []*genai.Part{toolCall("call_1")}}}, false)
+	if len(msgs) < 1 {
+		t.Fatal("got no messages, want at least the assistant message")
+	}
+	if msgs[0].ReasoningContent != nil {
+		t.Errorf("non-deepseek assistant tool turn: ReasoningContent = %v, want nil", msgs[0].ReasoningContent)
+	}
+}
+
 // TestGenerateContent_DeepSeekDisablesThinking verifies that a DeepSeek model
 // with tools present sends `thinking: {"type": "disabled"}` (not the vLLM-only
 // chat_template_kwargs knob) so DeepSeek doesn't enter thinking mode and then
