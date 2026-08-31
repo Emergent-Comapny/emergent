@@ -2728,6 +2728,18 @@ func contextInjectionMode(def *AgentDefinition) string {
 	return "full"
 }
 
+// agentLanguage returns the response language from the agent definition's
+// Config map (key "language"). Empty string when unset or not a string.
+func agentLanguage(def *AgentDefinition) string {
+	if def == nil {
+		return ""
+	}
+	if v, ok := def.Config["language"].(string); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
+}
+
 // resolveWorkspaceTools builds ADK tools that let the agent interact with its
 // provisioned workspace container (bash, read, write, edit, glob, grep, git).
 // Returns nil if the provisioner can't provide a provider for the workspace.
@@ -2997,6 +3009,10 @@ func (ae *AgentExecutor) resolveInstruction(req ExecuteRequest) string {
 		inst = *req.Agent.Prompt
 	} else {
 		inst = "You are a helpful assistant."
+	}
+
+	if lang := agentLanguage(req.AgentDefinition); lang != "" {
+		inst += "\n\nAlways respond in " + lang + "."
 	}
 
 	if appendix := ae.buildSkillsSystemPrompt(req); appendix != "" {
