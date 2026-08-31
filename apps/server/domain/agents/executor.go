@@ -976,32 +976,60 @@ func (ae *AgentExecutor) injectToolResponse(ctx context.Context, rootRunID, proj
 	}
 
 	// Build the FunctionResponse content — the human's answer (or child run output)
-	// is delivered as a tool response keyed to the original function call ID.
-	responseBody := map[string]any{}
+	// is delivered as one or more tool responses keyed to their function call IDs.
+	// Batch confirmations produce N parts in ONE event (matches ADK parallel merge).
+	var parts []*genai.Part
 	switch sc.Reason {
+	case SuspendReasonAwaitingToolConfirm:
+		if len(sc.PendingToolConfirmations) > 0 {
+			for _, c := range sc.PendingToolConfirmations {
+				parts = append(parts, &genai.Part{
+					FunctionResponse: &genai.FunctionResponse{
+						ID:       c.FunctionCallID,
+						Name:     c.ToolName,
+						Response: ae.confirmResponseBody(ctx, projectID, c.Decision, c.Message, c.ToolName, c.ToolArgs),
+					},
+				})
+			}
+		} else {
+			// Legacy single confirmation (in-flight runs created before batch support).
+			parts = append(parts, &genai.Part{
+				FunctionResponse: &genai.FunctionResponse{
+					ID:       sc.PendingToolCallID,
+					Name:     orDefaultToolName(sc.PendingToolName),
+					Response: ae.confirmResponseBody(ctx, projectID, req.UserMessage, req.RejectMessage, sc.PendingToolName, sc.PendingToolConfirmArgs),
+				},
+			})
+		}
 	case SuspendReasonAwaitingHuman:
-		responseBody["answer"] = req.UserMessage
+		responseBody := map[string]any{"answer": req.UserMessage}
 		if sc.QuestionID != "" {
 			responseBody["question_id"] = sc.QuestionID
 		}
+		parts = append(parts, &genai.Part{
+			FunctionResponse: &genai.FunctionResponse{
+				ID:       sc.PendingToolCallID,
+				Name:     orDefaultToolName(sc.PendingToolName),
+				Response: responseBody,
+			},
+		})
 	case SuspendReasonAwaitingChild:
-		responseBody["child_run_id"] = sc.WaitingForRunID
-		responseBody["status"] = "completed"
+		responseBody := map[string]any{"child_run_id": sc.WaitingForRunID, "status": "completed"}
 		if req.UserMessage != "" {
 			responseBody["output"] = req.UserMessage
 		}
+		parts = append(parts, &genai.Part{
+			FunctionResponse: &genai.FunctionResponse{
+				ID:       sc.PendingToolCallID,
+				Name:     orDefaultToolName(sc.PendingToolName),
+				Response: responseBody,
+			},
+		})
 	case SuspendReasonAwaitingClientTool:
 		// The agentcompat layer POSTed the client tool result content string in UserMessage.
-		// UserMessage is the raw tool result content (already extracted from the messages[]
-		// tool-role entry by extractToolResult → only the Content field, not the wrapper struct).
-		// Inject it as "result" so the LLM sees a clean tool response.
 		result := req.UserMessage
-		if result == "" {
-			result = ""
-		}
-		// If the content is JSON, surface it as the result directly so the LLM gets
-		// structured data rather than an escaped string.
 		var decoded any
+		responseBody := map[string]any{}
 		if result != "" {
 			if jsonErr := json.Unmarshal([]byte(result), &decoded); jsonErr == nil {
 				responseBody["result"] = decoded
@@ -1011,69 +1039,39 @@ func (ae *AgentExecutor) injectToolResponse(ctx context.Context, rootRunID, proj
 		} else {
 			responseBody["result"] = ""
 		}
-	case SuspendReasonAwaitingToolConfirm:
-		// User responded to a tool-policy confirmation question.
-		// "approve" (case-insensitive) → execute the tool directly using the saved args,
-		// inject the real tool result as a FunctionResponse (no LLM re-ask needed).
-		// "cancel" → inject a structured "not taken" result (revoked).
-		// Anything else → inject a structured rejected result (with optional reason).
-		userResp := strings.TrimSpace(strings.ToLower(req.UserMessage))
-		switch userResp {
-		case "approve":
-			// Execute the tool directly using the saved args — bypass ADK runner loop entirely.
-			toolResult, callErr := ae.toolPool.CallTool(ctx, projectID, sc.PendingToolName, sc.PendingToolConfirmArgs)
-			if callErr != nil {
-				responseBody["error"] = fmt.Sprintf("tool execution failed: %v", callErr)
-			} else {
-				for k, v := range toolResult {
-					responseBody[k] = v
-				}
-				if len(responseBody) == 0 {
-					responseBody["status"] = "ok"
-				}
-			}
-			ae.log.Info("injectToolResponse: executed approved tool directly",
-				slog.String("tool_name", sc.PendingToolName),
-				slog.Any("args", sc.PendingToolConfirmArgs),
-				slog.Any("result", responseBody),
-			)
-		case "cancel":
-			// Revoked: the call was not taken; the agent continues without it.
-			responseBody["policy_decision"] = "cancelled"
-			responseBody["status"] = "not_taken"
-		default:
-			// Rejected: deliver a structured result (not an error) so the agent
-			// reads it as a policy decision ("stop this direction") rather than
-			// a retryable failure.
-			responseBody["policy_decision"] = "rejected"
-			responseBody["status"] = "rejected"
-			if req.RejectMessage != "" {
-				responseBody["reason"] = req.RejectMessage
-			}
-		}
+		parts = append(parts, &genai.Part{
+			FunctionResponse: &genai.FunctionResponse{
+				ID:       sc.PendingToolCallID,
+				Name:     orDefaultToolName(sc.PendingToolName),
+				Response: responseBody,
+			},
+		})
 	default:
-		responseBody["answer"] = req.UserMessage
+		parts = append(parts, &genai.Part{
+			FunctionResponse: &genai.FunctionResponse{
+				ID:       sc.PendingToolCallID,
+				Name:     orDefaultToolName(sc.PendingToolName),
+				Response: map[string]any{"answer": req.UserMessage},
+			},
+		})
 	}
 
-	toolName := sc.PendingToolName
-	if toolName == "" {
-		toolName = "ask_user"
+	// ADK convention: author = agent name, role = "user". A tool-name author or
+	// "tool" role is treated as foreign and textualized, breaking pairing.
+	author := "user"
+	if req.AgentDefinition != nil && req.AgentDefinition.Name != "" {
+		author = req.AgentDefinition.Name
+	} else if req.Agent != nil && req.Agent.Name != "" {
+		author = req.Agent.Name
 	}
 
-	funcRespPart := &genai.Part{
-		FunctionResponse: &genai.FunctionResponse{
-			ID:       sc.PendingToolCallID,
-			Name:     toolName,
-			Response: responseBody,
-		},
-	}
 	content := &genai.Content{
-		Role:  "tool",
-		Parts: []*genai.Part{funcRespPart},
+		Role:  "user",
+		Parts: parts,
 	}
 
 	event := &session.Event{
-		Author: toolName,
+		Author: author,
 		LLMResponse: model.LLMResponse{
 			Content: content,
 		},
@@ -1085,10 +1083,48 @@ func (ae *AgentExecutor) injectToolResponse(ctx context.Context, rootRunID, proj
 
 	ae.log.Info("injected FunctionResponse into ADK session",
 		slog.String("session_id", sessionID),
-		slog.String("tool_call_id", sc.PendingToolCallID),
-		slog.String("tool_name", toolName),
+		slog.Int("parts", len(parts)),
 	)
 	return nil
+}
+
+// confirmResponseBody builds the FunctionResponse body for a single tool-policy
+// confirmation decision: approve executes the tool, cancel is "not_taken", and
+// anything else is a structured rejection (optionally with a reason).
+func (ae *AgentExecutor) confirmResponseBody(ctx context.Context, projectID, decision, message, toolName string, toolArgs map[string]any) map[string]any {
+	responseBody := map[string]any{}
+	switch strings.TrimSpace(strings.ToLower(decision)) {
+	case "approve":
+		toolResult, callErr := ae.toolPool.CallTool(ctx, projectID, toolName, toolArgs)
+		if callErr != nil {
+			responseBody["error"] = fmt.Sprintf("tool execution failed: %v", callErr)
+		} else {
+			for k, v := range toolResult {
+				responseBody[k] = v
+			}
+			if len(responseBody) == 0 {
+				responseBody["status"] = "ok"
+			}
+		}
+	case "cancel":
+		responseBody["policy_decision"] = "cancelled"
+		responseBody["status"] = "not_taken"
+	default:
+		responseBody["policy_decision"] = "rejected"
+		responseBody["status"] = "rejected"
+		if message != "" {
+			responseBody["reason"] = message
+		}
+	}
+	return responseBody
+}
+
+// orDefaultToolName returns name, or "ask_user" when empty.
+func orDefaultToolName(name string) string {
+	if name == "" {
+		return "ask_user"
+	}
+	return name
 }
 
 // maybeWakeParent checks whether a parent run is suspended waiting for childRunID.
@@ -1660,17 +1696,26 @@ func (ae *AgentExecutor) runPipeline(
 			}, nil
 		}
 
-		// Check if a tool-policy confirmation is pending
-		if toolConfirmState.ShouldConfirm() {
+		// Check if tool-policy confirmations are pending (single or batch).
+		if confirmations := toolConfirmState.Confirmations(); len(confirmations) > 0 {
+			sig := SuspendSignal{
+				Reason:                   SuspendReasonAwaitingToolConfirm,
+				PendingToolConfirmations: confirmations,
+			}
 			ae.log.Info("tool_policy confirmation pending, pausing agent",
 				slog.String("run_id", run.ID),
-				slog.String("tool", toolConfirmState.ToolName()),
-				slog.String("question_id", toolConfirmState.QuestionID()),
+				slog.Int("confirmations", len(confirmations)),
 				slog.Int("step", currentStep),
 			)
+			if scErr := ae.repo.UpdateSuspendContext(dbCtx, run.ID, sig.ToMap()); scErr != nil {
+				ae.log.Warn("failed to persist suspend_context for tool confirm",
+					slog.String("run_id", run.ID),
+					slog.String("error", scErr.Error()),
+				)
+			}
 			_ = ae.repo.PauseRun(dbCtx, run.ID, currentStep)
 			return &model.LLMResponse{
-				Content: genai.NewContentFromText("Execution paused. Waiting for user approval of tool call.", genai.RoleModel),
+				Content: genai.NewContentFromText("Execution paused. Waiting for user approval of tool call(s).", genai.RoleModel),
 			}, nil
 		}
 
@@ -1737,6 +1782,7 @@ func (ae *AgentExecutor) runPipeline(
 						{Label: "Reject", Value: "reject"},
 					},
 					InteractionType: QuestionInteractionButtons,
+					SkipCancel:      true,
 				})
 				if qErr != nil {
 					ae.log.Warn("tool_policy: failed to create confirmation question, proceeding without confirmation",
@@ -1779,7 +1825,12 @@ func (ae *AgentExecutor) runPipeline(
 					slog.String("tool", t.Name()),
 					slog.String("question_id", q.ID),
 				)
-				toolConfirmState.RequestConfirm(q.ID, t.Name(), args)
+				toolConfirmState.AddConfirmation(ToolConfirmation{
+					QuestionID:     q.ID,
+					FunctionCallID: tCtx.FunctionCallID(),
+					ToolName:       t.Name(),
+					ToolArgs:       args,
+				})
 				// Return synthetic result — skips actual tool.Run(); afterToolCb will still fire.
 				return map[string]any{
 					"status":      "awaiting_confirmation",
@@ -1881,32 +1932,8 @@ func (ae *AgentExecutor) runPipeline(
 			_ = ae.repo.PauseRun(dbCtx, run.ID, currentStep)
 		}
 
-		// Tool-policy confirmation: beforeToolCb skipped execution and created a question.
-		// Now pause the run, storing the original tool name+args so Resume can re-execute
-		// on approve or inject an error result on reject.
-		if toolConfirmState.ShouldConfirm() {
-			functionCallID := tCtx.FunctionCallID()
-			sig := SuspendSignal{
-				Reason:                 SuspendReasonAwaitingToolConfirm,
-				QuestionID:             toolConfirmState.QuestionID(),
-				PendingToolCallID:      functionCallID,
-				PendingToolName:        toolConfirmState.ToolName(),
-				PendingToolConfirmArgs: toolConfirmState.ToolArgs(),
-			}
-			ae.log.Info("tool_policy afterToolCb: pausing run awaiting confirmation",
-				slog.String("run_id", run.ID),
-				slog.String("tool", sig.PendingToolName),
-				slog.String("question_id", sig.QuestionID),
-				slog.String("pending_tool_call_id", functionCallID),
-			)
-			if scErr := ae.repo.UpdateSuspendContext(dbCtx, run.ID, sig.ToMap()); scErr != nil {
-				ae.log.Warn("failed to persist suspend_context for tool confirm",
-					slog.String("run_id", run.ID),
-					slog.String("error", scErr.Error()),
-				)
-			}
-			_ = ae.repo.PauseRun(dbCtx, run.ID, currentStep)
-		}
+		// Tool-policy confirmations are handled in beforeModelCb (single sync
+		// point after all parallel tool calls complete), not per-tool here.
 
 		// Check for spawn cascade: if a spawned child paused, propagate suspend upward.
 		if coordDeps != nil && coordDeps.SuspendSignal != nil {

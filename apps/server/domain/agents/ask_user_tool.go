@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -41,54 +42,36 @@ func (s *AskPauseState) QuestionID() string {
 	return v.(string)
 }
 
-// ToolConfirmPauseState tracks a pending tool-policy confirmation for a single run.
-// Set by beforeToolCb when a tool has Confirm:true; read by afterToolCb to build
-// the SuspendSignal with SuspendReasonAwaitingToolConfirm.
+// ToolConfirmPauseState tracks pending tool-policy confirmations for a single
+// run. The ADK runner dispatches multiple tool calls from one LLM turn in
+// parallel goroutines, so beforeToolCb appends one entry per intercepted tool
+// and beforeModelCb snapshots the batch. Thread-safe via mutex.
 type ToolConfirmPauseState struct {
-	requested  atomic.Bool
-	questionID atomic.Value // stores string
-	toolName   atomic.Value // stores string
-	toolArgs   atomic.Value // stores map[string]any
+	mu      sync.Mutex
+	pending []ToolConfirmation
 }
 
-// RequestConfirm signals that the tool call should be confirmed before execution.
-func (s *ToolConfirmPauseState) RequestConfirm(questionID, toolName string, args map[string]any) {
-	s.questionID.Store(questionID)
-	s.toolName.Store(toolName)
-	s.toolArgs.Store(args)
-	s.requested.Store(true)
+// AddConfirmation records a pending tool-policy confirmation. Thread-safe.
+func (s *ToolConfirmPauseState) AddConfirmation(c ToolConfirmation) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pending = append(s.pending, c)
 }
 
-// ShouldConfirm returns true if a tool confirm was requested.
-func (s *ToolConfirmPauseState) ShouldConfirm() bool {
-	return s.requested.Load()
+// Confirmations returns a snapshot of all pending confirmations. Thread-safe.
+func (s *ToolConfirmPauseState) Confirmations() []ToolConfirmation {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]ToolConfirmation, len(s.pending))
+	copy(out, s.pending)
+	return out
 }
 
-// QuestionID returns the confirmation question ID, or empty string.
-func (s *ToolConfirmPauseState) QuestionID() string {
-	v := s.questionID.Load()
-	if v == nil {
-		return ""
-	}
-	return v.(string)
-}
-
-// ToolName returns the tool name awaiting confirmation.
-func (s *ToolConfirmPauseState) ToolName() string {
-	v := s.toolName.Load()
-	if v == nil {
-		return ""
-	}
-	return v.(string)
-}
-
-// ToolArgs returns the original tool arguments to execute on confirm.
-func (s *ToolConfirmPauseState) ToolArgs() map[string]any {
-	v := s.toolArgs.Load()
-	if v == nil {
-		return nil
-	}
-	return v.(map[string]any)
+// HasPending reports whether any confirmation is pending. Thread-safe.
+func (s *ToolConfirmPauseState) HasPending() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.pending) > 0
 }
 
 // AskUserToolDeps holds the dependencies needed by the ask_user tool.
@@ -121,18 +104,24 @@ type CreateQuestionParams struct {
 	InteractionType AgentQuestionInteractionType
 	Placeholder     string
 	MaxLength       int
+	// SkipCancel skips cancelling prior pending questions for the run. Set by the
+	// tool-policy confirmation gate so parallel confirmations don't cancel siblings.
+	SkipCancel bool
 }
 
 // CreateAndEmitQuestion creates an AgentQuestion record, optionally creates a
 // notification, and emits an SSE event. It is used by both the ask_user tool
 // and the tool-policy confirmation gate.
 func CreateAndEmitQuestion(ctx context.Context, p CreateQuestionParams) (*AgentQuestion, error) {
-	// Cancel any existing pending questions for this run
-	if err := p.Repo.CancelPendingQuestionsForRun(ctx, p.RunID); err != nil {
-		p.Logger.Warn("failed to cancel prior pending questions",
-			slog.String("run_id", p.RunID),
-			slog.String("error", err.Error()),
-		)
+	// Cancel any existing pending questions for this run, unless this is a batch
+	// confirmation (parallel confirm gates must not cancel each other's questions).
+	if !p.SkipCancel {
+		if err := p.Repo.CancelPendingQuestionsForRun(ctx, p.RunID); err != nil {
+			p.Logger.Warn("failed to cancel prior pending questions",
+				slog.String("run_id", p.RunID),
+				slog.String("error", err.Error()),
+			)
+		}
 	}
 
 	q := &AgentQuestion{

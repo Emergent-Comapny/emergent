@@ -16,6 +16,37 @@ const (
 	SuspendReasonAwaitingClientTool SuspendReason = "awaiting_client_tool"
 )
 
+// ToolConfirmation is one pending tool-policy confirmation within a batch. When
+// the ADK runner dispatches multiple tool calls from one LLM turn in parallel,
+// each intercepted tool produces one ToolConfirmation.
+type ToolConfirmation struct {
+	QuestionID     string         `json:"question_id"`
+	FunctionCallID string         `json:"function_call_id"`
+	ToolName       string         `json:"tool_name"`
+	ToolArgs       map[string]any `json:"tool_args,omitempty"`
+	Decision       string         `json:"decision,omitempty"` // pending, approved, rejected, cancelled
+	Message        string         `json:"message,omitempty"`  // optional reject message
+}
+
+// ToMap serialises the confirmation for JSONB storage.
+func (c ToolConfirmation) ToMap() map[string]any {
+	m := map[string]any{
+		"question_id":      c.QuestionID,
+		"function_call_id": c.FunctionCallID,
+		"tool_name":        c.ToolName,
+	}
+	if c.ToolArgs != nil {
+		m["tool_args"] = c.ToolArgs
+	}
+	if c.Decision != "" {
+		m["decision"] = c.Decision
+	}
+	if c.Message != "" {
+		m["message"] = c.Message
+	}
+	return m
+}
+
 // SuspendSignal is set by a tool (or spawn handler) to indicate that the current
 // run should be suspended after the tool call completes. The executor's afterToolCb
 // checks for this signal and performs the actual pause.
@@ -41,6 +72,11 @@ type SuspendSignal struct {
 	// On reject-resume, the executor injects an error FunctionResponse.
 	PendingToolConfirmArgs map[string]any
 
+	// PendingToolConfirmations holds the batch of tool-policy confirmations when
+	// Reason == SuspendReasonAwaitingToolConfirm and multiple tools in one turn each
+	// required confirmation. Empty/nil selects the legacy single-confirmation path.
+	PendingToolConfirmations []ToolConfirmation
+
 	// PendingClientToolArgs holds the args for SuspendReasonAwaitingClientTool.
 	// The agentcompat layer serialises these into an OpenAI tool_calls response so
 	// the caller can execute the function and POST results back.
@@ -62,6 +98,13 @@ func (s SuspendSignal) ToMap() map[string]any {
 	}
 	if s.PendingToolConfirmArgs != nil {
 		m["pending_tool_confirm_args"] = s.PendingToolConfirmArgs
+	}
+	if len(s.PendingToolConfirmations) > 0 {
+		list := make([]any, 0, len(s.PendingToolConfirmations))
+		for _, c := range s.PendingToolConfirmations {
+			list = append(list, c.ToMap())
+		}
+		m["pending_tool_confirmations"] = list
 	}
 	if s.PendingClientToolArgs != nil {
 		m["pending_client_tool_args"] = s.PendingClientToolArgs
@@ -88,6 +131,25 @@ func SuspendSignalFromMap(m map[string]any) *SuspendSignal {
 	s.PendingToolName, _ = m["pending_tool_name"].(string)
 	if args, ok := m["pending_tool_confirm_args"].(map[string]any); ok {
 		s.PendingToolConfirmArgs = args
+	}
+	if raw, ok := m["pending_tool_confirmations"].([]any); ok {
+		s.PendingToolConfirmations = make([]ToolConfirmation, 0, len(raw))
+		for _, item := range raw {
+			im, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			tc := ToolConfirmation{}
+			tc.QuestionID, _ = im["question_id"].(string)
+			tc.FunctionCallID, _ = im["function_call_id"].(string)
+			tc.ToolName, _ = im["tool_name"].(string)
+			tc.Decision, _ = im["decision"].(string)
+			tc.Message, _ = im["message"].(string)
+			if cargs, ok := im["tool_args"].(map[string]any); ok {
+				tc.ToolArgs = cargs
+			}
+			s.PendingToolConfirmations = append(s.PendingToolConfirmations, tc)
+		}
 	}
 	if args, ok := m["pending_client_tool_args"].(map[string]any); ok {
 		s.PendingClientToolArgs = args
