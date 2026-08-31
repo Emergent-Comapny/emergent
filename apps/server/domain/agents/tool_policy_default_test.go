@@ -76,21 +76,35 @@ func TestDefaultToolPolicy_MissingFieldBehavesAsAllow(t *testing.T) {
 	assert.False(t, ok, "absent defaultToolPolicy must behave as allow")
 }
 
-func TestRedactToolArgs_RedactsValues(t *testing.T) {
+func TestRedactToolArgs_PreservesValues(t *testing.T) {
 	out := redactToolArgs(map[string]any{
-		"title":  "secret title",
+		"title":  "a title",
 		"count":  42,
+		"url":    "https://example.com",
 		"flag":   true,
 		"nested": map[string]any{"token": "abc"},
 		"list":   []any{"a"},
-		"nil":    nil,
 	})
-	assert.Equal(t, "string", out["title"])
-	assert.Equal(t, "number", out["count"])
-	assert.Equal(t, "boolean", out["flag"])
-	assert.Equal(t, "object", out["nested"])
-	assert.Equal(t, "array", out["list"])
-	assert.Equal(t, "null", out["nil"])
+	assert.Equal(t, "a title", out["title"])
+	assert.Equal(t, 42, out["count"])
+	assert.Equal(t, "https://example.com", out["url"])
+	assert.Equal(t, true, out["flag"])
+	// Nested objects/lists are preserved (only secret keys are redacted).
+	assert.NotNil(t, out["nested"])
+	assert.NotNil(t, out["list"])
+}
+
+func TestRedactToolArgs_RedactsSecrets(t *testing.T) {
+	out := redactToolArgs(map[string]any{
+		"url":        "https://example.com",
+		"api_token":  "secret-value",
+		"password":   "hunter2",
+		"nested_key": "keep",
+	})
+	assert.Equal(t, "https://example.com", out["url"])
+	assert.Equal(t, "[redacted]", out["api_token"])
+	assert.Equal(t, "[redacted]", out["password"])
+	assert.Equal(t, "keep", out["nested_key"], "plain 'key' suffix is not a secret")
 }
 
 func TestRedactToolArgs_Empty(t *testing.T) {

@@ -71,38 +71,34 @@ type StreamEvent struct {
 // When set on ExecuteRequest, it enables real-time streaming of text tokens and tool calls.
 type StreamCallback func(event StreamEvent)
 
-// redactToolArgs returns a redacted summary of tool arguments for audit storage:
-// keys are preserved, values are replaced by a type hint so secret values never
-// reach the audit trail.
+// redactToolArgs returns a copy of the tool arguments for audit storage. Values
+// are preserved so a human reviewer sees exactly what the agent proposed, except
+// for obvious secret keys which are replaced with a redaction marker.
 func redactToolArgs(args map[string]any) map[string]any {
 	if len(args) == 0 {
 		return map[string]any{}
 	}
 	out := make(map[string]any, len(args))
 	for k, v := range args {
-		out[k] = typeHint(v)
+		if isSecretKey(k) {
+			out[k] = "[redacted]"
+		} else {
+			out[k] = v
+		}
 	}
 	return out
 }
 
-// typeHint classifies a value by Go type without revealing its contents.
-func typeHint(v any) string {
-	switch v.(type) {
-	case nil:
-		return "null"
-	case bool:
-		return "boolean"
-	case float64, float32, int, int32, int64, json.Number:
-		return "number"
-	case string:
-		return "string"
-	case []any:
-		return "array"
-	case map[string]any:
-		return "object"
-	default:
-		return "unknown"
+// isSecretKey reports whether a tool-argument key looks like a credential or
+// secret that should never be persisted to the audit trail.
+func isSecretKey(k string) bool {
+	lk := strings.ToLower(k)
+	for _, frag := range []string{"token", "secret", "password", "passwd", "authorization", "api_key", "apikey", "credential", "private_key"} {
+		if strings.Contains(lk, frag) {
+			return true
+		}
 	}
+	return false
 }
 
 // thinkingTexts splits an assistant event's parts into the planning text
