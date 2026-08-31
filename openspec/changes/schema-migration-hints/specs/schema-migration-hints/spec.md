@@ -38,13 +38,15 @@ All sub-fields are optional. The `from_version` field is required if the `migrat
 ### Requirement: Migration hints are validated at publish time
 When a schema with a `migrations` block is created or updated, the server SHALL validate that all referenced type names and property names exist in the schema definition.
 
-#### Scenario: Type name in hints does not exist in schema
-- **WHEN** a user publishes a schema where `type_renames.from` references a type that does not exist in `object_type_schemas`
+#### Scenario: Rename target type does not exist in schema
+- **WHEN** a user publishes a schema where `type_renames.to` references a type that does not exist in `object_type_schemas`
 - **THEN** the server SHALL return a 400 error listing all invalid references
+- **NOTE** `type_renames.from` is the old type name from the `from_version` schema and is NOT validated against the new schema.
 
-#### Scenario: Property name in hints does not exist in the type
-- **WHEN** a user publishes a schema where `property_renames.from` references a property that does not exist in the referenced type's definition
+#### Scenario: Rename target property does not exist in the type
+- **WHEN** a user publishes a schema where `property_renames.to` references a property that does not exist in the referenced type's definition
 - **THEN** the server SHALL return a 400 error listing all invalid property references
+- **NOTE** `property_renames.from` is the old property name and `removed_properties.name` is a deliberately-dropped property, so neither is validated against the new schema.
 
 #### Scenario: Valid hints pass validation
 - **WHEN** all type names and property names in the `migrations` block exist in the schema

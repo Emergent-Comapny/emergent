@@ -25851,6 +25851,17 @@ const docTemplate = `{
                 }
             }
         },
+        "domain_schemas.AddedProperty": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "type_name": {
+                    "type": "string"
+                }
+            }
+        },
         "domain_schemas.AssignPackRequest": {
             "type": "object",
             "properties": {
@@ -26272,11 +26283,35 @@ const docTemplate = `{
         "domain_schemas.MigrationTypeResult": {
             "type": "object",
             "properties": {
+                "added_props": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "block_reason": {
                     "type": "string"
                 },
                 "can_proceed": {
                     "type": "boolean"
+                },
+                "coerced_props": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "dropped_props": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "migrated_props": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "object_count": {
                     "type": "integer"
@@ -26666,10 +26701,10 @@ const docTemplate = `{
                         "$ref": "#/definitions/domain_schemas.MigrationTypeResult"
                     }
                 },
-                "project_id": {
-                    "type": "string"
+                "plan": {
+                    "$ref": "#/definitions/domain_schemas.SchemaMigrationPlan"
                 },
-                "suggested_hints_yaml": {
+                "project_id": {
                     "type": "string"
                 },
                 "to_schema_id": {
@@ -26677,6 +26712,41 @@ const docTemplate = `{
                 },
                 "total_objects": {
                     "type": "integer"
+                }
+            }
+        },
+        "domain_schemas.SchemaMigrationPlan": {
+            "type": "object",
+            "properties": {
+                "added_properties": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/domain_schemas.AddedProperty"
+                    }
+                },
+                "added_types": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "property_renames": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/domain_schemas.PropertyRename"
+                    }
+                },
+                "removed_properties": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/domain_schemas.RemovedProperty"
+                    }
+                },
+                "type_renames": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/domain_schemas.TypeRename"
+                    }
                 }
             }
         },

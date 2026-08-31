@@ -5102,6 +5102,13 @@ definitions:
           type: integer
         type: array
     type: object
+  domain_schemas.AddedProperty:
+    properties:
+      name:
+        type: string
+      type_name:
+        type: string
+    type: object
   domain_schemas.AssignPackRequest:
     properties:
       auto_uninstall:
@@ -5403,10 +5410,26 @@ definitions:
     type: object
   domain_schemas.MigrationTypeResult:
     properties:
+      added_props:
+        items:
+          type: string
+        type: array
       block_reason:
         type: string
       can_proceed:
         type: boolean
+      coerced_props:
+        items:
+          type: string
+        type: array
+      dropped_props:
+        items:
+          type: string
+        type: array
+      migrated_props:
+        items:
+          type: string
+        type: array
       object_count:
         type: integer
       risk_level:
@@ -5667,14 +5690,37 @@ definitions:
         items:
           $ref: '#/definitions/domain_schemas.MigrationTypeResult'
         type: array
+      plan:
+        $ref: '#/definitions/domain_schemas.SchemaMigrationPlan'
       project_id:
-        type: string
-      suggested_hints_yaml:
         type: string
       to_schema_id:
         type: string
       total_objects:
         type: integer
+    type: object
+  domain_schemas.SchemaMigrationPlan:
+    properties:
+      added_properties:
+        items:
+          $ref: '#/definitions/domain_schemas.AddedProperty'
+        type: array
+      added_types:
+        items:
+          type: string
+        type: array
+      property_renames:
+        items:
+          $ref: '#/definitions/domain_schemas.PropertyRename'
+        type: array
+      removed_properties:
+        items:
+          $ref: '#/definitions/domain_schemas.RemovedProperty'
+        type: array
+      type_renames:
+        items:
+          $ref: '#/definitions/domain_schemas.TypeRename'
+        type: array
     type: object
   domain_schemas.SchemaMigrationRollbackRequest:
     properties:
