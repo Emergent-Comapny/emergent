@@ -376,3 +376,36 @@ func TestRepository_RecordAndListApplied(t *testing.T) {
 	require.Len(t, got, 1, "re-apply must upsert, not insert a duplicate row")
 	assert.Equal(t, "def456", got[0].Checksum)
 }
+
+// TestRepository_SupersedeOnUpgrade verifies that applying a newer version of
+// the same blueprint name supersedes the previous application, so ListApplied
+// returns only the latest version.
+func TestRepository_SupersedeOnUpgrade(t *testing.T) {
+	db := connectTestDB(t)
+	repo := NewRepository(db, testLogger())
+	ctx := context.Background()
+
+	_, projectID := seedProject(t, db)
+
+	name := uniqueName("upgrade")
+	bp1 := testBlueprint(name, "1.0.0")
+	require.NoError(t, repo.Create(ctx, bp1))
+	bp2 := testBlueprint(name, "2.0.0")
+	require.NoError(t, repo.Create(ctx, bp2))
+
+	// Apply v1, then apply v2 (superseding v1).
+	require.NoError(t, repo.RecordApplication(ctx, &BlueprintApplication{
+		BlueprintID: bp1.ID, ProjectID: projectID, Version: "1.0.0", Status: "applied",
+		AppliedAt: time.Now(), UpdatedAt: time.Now(),
+	}))
+	require.NoError(t, repo.RecordApplication(ctx, &BlueprintApplication{
+		BlueprintID: bp2.ID, ProjectID: projectID, Version: "2.0.0", Status: "applied",
+		AppliedAt: time.Now(), UpdatedAt: time.Now(),
+	}))
+	require.NoError(t, repo.SupersedeApplications(ctx, projectID, bp2.ID, name))
+
+	got, err := repo.ListApplied(ctx, projectID)
+	require.NoError(t, err)
+	require.Len(t, got, 1, "upgrade must supersede the previous version")
+	assert.Equal(t, "2.0.0", got[0].Version)
+}
