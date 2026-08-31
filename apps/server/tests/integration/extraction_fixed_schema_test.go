@@ -529,6 +529,7 @@ func (s *ExtractionFixedSchemaTestSuite) runExtraction(documentID string) *extra
 		graphSvc,
 		nil, // branchService — nil → objects go to main graph directly
 		docsSvc,
+		nil, // projectsRepo — nil → auto-merge disabled (main graph direct)
 		extractionSchemaProvider,
 		modelFactory,
 		nil, // embeddingService
@@ -1864,6 +1865,7 @@ func (s *ExtractionFixedSchemaTestSuite) runExtractionOnProject(
 		graphSvc,
 		nil, // branchService — nil → objects go to main graph directly
 		docsSvc,
+		nil, // projectsRepo — nil → auto-merge disabled (main graph direct)
 		extractionSchemaProvider,
 		modelFactory,
 		nil, // embeddingService
@@ -3187,6 +3189,7 @@ func (s *ExtractionFixedSchemaTestSuite) runExtractionToBranch(documentID string
 		graphSvc,
 		branchSvc, // wired → creates staging branch
 		docsSvc,
+		nil, // projectsRepo — nil → auto-merge disabled (main graph direct)
 		extractionSchemaProvider,
 		modelFactory,
 		nil,

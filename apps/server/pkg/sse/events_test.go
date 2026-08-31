@@ -231,6 +231,40 @@ func TestNewDoneEvent(t *testing.T) {
 	}
 }
 
+func TestNewThinkingEvent(t *testing.T) {
+	tests := []struct {
+		name string
+		id   string
+		role string
+		text string
+	}{
+		{name: "operator planning", id: "1", role: "operator", text: "Let me plan this."},
+		{name: "reasoning", id: "2", role: "reasoning", text: "hidden chain-of-thought"},
+		{name: "empty text", id: "3", role: "operator", text: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			event := NewThinkingEvent(tt.id, tt.role, tt.text)
+			if event.Type != string(EventThinking) {
+				t.Errorf("Type = %q, want %q", event.Type, string(EventThinking))
+			}
+			if event.ID != tt.id {
+				t.Errorf("ID = %q, want %q", event.ID, tt.id)
+			}
+			if event.Role != tt.role {
+				t.Errorf("Role = %q, want %q", event.Role, tt.role)
+			}
+			if event.Text != tt.text {
+				t.Errorf("Text = %q, want %q", event.Text, tt.text)
+			}
+			if !event.Done {
+				t.Error("Done should be true")
+			}
+		})
+	}
+}
+
 func TestChatEventTypeConstants(t *testing.T) {
 	// Verify constants have expected values
 	tests := []struct {
@@ -240,6 +274,7 @@ func TestChatEventTypeConstants(t *testing.T) {
 	}{
 		{"EventMeta", EventMeta, "meta"},
 		{"EventToken", EventToken, "token"},
+		{"EventThinking", EventThinking, "thinking"},
 		{"EventMCPTool", EventMCPTool, "mcp_tool"},
 		{"EventError", EventError, "error"},
 		{"EventDone", EventDone, "done"},

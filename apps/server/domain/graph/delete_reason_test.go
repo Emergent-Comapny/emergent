@@ -16,6 +16,9 @@ type DeleteReasonSuite struct {
 }
 
 func TestDeleteReasonSuite(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping database integration test in short mode")
+	}
 	suite.Run(t, new(DeleteReasonSuite))
 }
 

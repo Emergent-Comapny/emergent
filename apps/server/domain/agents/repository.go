@@ -1939,10 +1939,13 @@ func (r *Repository) CancelPendingQuestionsForRun(ctx context.Context, runID str
 	return err
 }
 
-// AnswerQuestion updates a question with the user's response.
-func (r *Repository) AnswerQuestion(ctx context.Context, id string, response string, respondedBy string) error {
+// AnswerQuestion atomically claims a pending question by recording the user's
+// response. Returns true when this call won the claim (the question was
+// pending), false when it was already answered/cancelled (lost a concurrent
+// claim). Callers must only resume the run when claimed is true.
+func (r *Repository) AnswerQuestion(ctx context.Context, id string, response string, respondedBy string) (bool, error) {
 	now := time.Now()
-	_, err := r.db.NewUpdate().
+	res, err := r.db.NewUpdate().
 		Model((*AgentQuestion)(nil)).
 		Set("response = ?", response).
 		Set("responded_by = ?", respondedBy).
@@ -1952,7 +1955,89 @@ func (r *Repository) AnswerQuestion(ctx context.Context, id string, response str
 		Where("id = ?", id).
 		Where("status = ?", QuestionStatusPending).
 		Exec(ctx)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// CreateToolApproval inserts a pending tool-approval audit record.
+func (r *Repository) CreateToolApproval(ctx context.Context, a *AgentToolApproval) error {
+	if a.CreatedAt.IsZero() {
+		a.CreatedAt = time.Now()
+	}
+	if a.UpdatedAt.IsZero() {
+		a.UpdatedAt = time.Now()
+	}
+	_, err := r.db.NewInsert().Model(a).Exec(ctx)
 	return err
+}
+
+// UpdateToolApprovalDecision records the human decision on a tool-approval audit
+// record, keyed by question ID. Only a pending record is updated (idempotent).
+func (r *Repository) UpdateToolApprovalDecision(ctx context.Context, questionID, decision, message, decidedBy string) error {
+	now := time.Now()
+	_, err := r.db.NewUpdate().
+		Model((*AgentToolApproval)(nil)).
+		Set("decision = ?", decision).
+		Set("message = ?", message).
+		Set("decided_by = ?", decidedBy).
+		Set("decided_at = ?", now).
+		Set("updated_at = ?", now).
+		Where("question_id = ?", questionID).
+		Where("decision = ?", "pending").
+		Exec(ctx)
+	return err
+}
+
+// CancelQuestion atomically claims a pending question by marking it cancelled.
+// Returns true when this call won the claim, false when the question was
+// already answered/cancelled. Callers must only resume the run when claimed.
+func (r *Repository) CancelQuestion(ctx context.Context, id string) (bool, error) {
+	now := time.Now()
+	res, err := r.db.NewUpdate().
+		Model((*AgentQuestion)(nil)).
+		Set("status = ?", QuestionStatusCancelled).
+		Set("updated_at = ?", now).
+		Where("id = ?", id).
+		Where("status = ?", QuestionStatusPending).
+		Exec(ctx)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// ReopenQuestion reverts a claimed question back to pending so the user can
+// retry after a resume-setup failure. Used only on the error path after a
+// successful claim, so a failed resume does not leave the run stuck paused.
+func (r *Repository) ReopenQuestion(ctx context.Context, id string) error {
+	now := time.Now()
+	_, err := r.db.NewUpdate().
+		Model((*AgentQuestion)(nil)).
+		Set("status = ?", QuestionStatusPending).
+		Set("updated_at = ?", now).
+		Where("id = ?", id).
+		Exec(ctx)
+	return err
+}
+
+// ListToolApprovals returns tool-approval audit records for a project, newest
+// first, optionally filtered by decision (pending, approved, rejected, cancelled).
+func (r *Repository) ListToolApprovals(ctx context.Context, projectID string, decision *string) ([]*AgentToolApproval, error) {
+	var approvals []*AgentToolApproval
+	q := r.db.NewSelect().
+		Model(&approvals).
+		Where("project_id = ?", projectID)
+	if decision != nil {
+		q = q.Where("decision = ?", *decision)
+	}
+	if err := q.Order("created_at DESC").Scan(ctx); err != nil {
+		return nil, err
+	}
+	return approvals, nil
 }
 
 // ListQuestionsByRunID returns all questions for a run, ordered by creation time.

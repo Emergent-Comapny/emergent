@@ -46,21 +46,81 @@ const (
 	StreamEventToolCallEnd
 	// StreamEventError is emitted when an error occurs during execution.
 	StreamEventError
+	// StreamEventToolApproval is emitted when a tool-policy confirmation gate
+	// intercepts a tool call and pauses the run awaiting user approval.
+	StreamEventToolApproval
+	// StreamEventThinking is emitted for the agent's reasoning/planning text
+	// (non-final assistant text) so callers can surface it separately from the
+	// final answer.
+	StreamEventThinking
 )
 
 // StreamEvent is a single event emitted during agent execution via StreamCallback.
 type StreamEvent struct {
-	Type   StreamEventType
-	Text   string         // For TextDelta: the incremental text token
-	Tool   string         // For ToolCallStart/End: the tool name
-	Input  map[string]any // For ToolCallStart: the tool arguments
-	Output map[string]any // For ToolCallEnd: the tool result
-	Error  string         // For Error/ToolCallEnd: error message
+	Type       StreamEventType
+	Text       string         // For TextDelta: the incremental text token
+	Tool       string         // For ToolCallStart/End/Approval: the tool name
+	Input      map[string]any // For ToolCallStart/Approval: the tool arguments
+	Output     map[string]any // For ToolCallEnd: the tool result
+	Error      string         // For Error/ToolCallEnd: error message
+	QuestionID string         // For ToolApproval: the confirmation question ID
+	Role       string         // For Thinking: "operator" (planning text) or "reasoning" (chain-of-thought)
 }
 
 // StreamCallback is an optional function invoked for each streaming event during execution.
 // When set on ExecuteRequest, it enables real-time streaming of text tokens and tool calls.
 type StreamCallback func(event StreamEvent)
+
+// redactToolArgs returns a redacted summary of tool arguments for audit storage:
+// keys are preserved, values are replaced by a type hint so secret values never
+// reach the audit trail.
+func redactToolArgs(args map[string]any) map[string]any {
+	if len(args) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(args))
+	for k, v := range args {
+		out[k] = typeHint(v)
+	}
+	return out
+}
+
+// typeHint classifies a value by Go type without revealing its contents.
+func typeHint(v any) string {
+	switch v.(type) {
+	case nil:
+		return "null"
+	case bool:
+		return "boolean"
+	case float64, float32, int, int32, int64, json.Number:
+		return "number"
+	case string:
+		return "string"
+	case []any:
+		return "array"
+	case map[string]any:
+		return "object"
+	default:
+		return "unknown"
+	}
+}
+
+// thinkingTexts splits an assistant event's parts into the planning text
+// (non-Thought parts — the pre-tool monologue) and the reasoning text (Thought
+// parts — the model's chain-of-thought). Nil and empty parts are skipped.
+func thinkingTexts(parts []*genai.Part) (operator, reasoning []string) {
+	for _, part := range parts {
+		if part == nil || part.Text == "" {
+			continue
+		}
+		if part.Thought {
+			reasoning = append(reasoning, part.Text)
+		} else {
+			operator = append(operator, part.Text)
+		}
+	}
+	return operator, reasoning
+}
 
 // ModelLimitsLookup is a narrow interface for querying model token limits
 // from the provider catalog. It is satisfied by *provider.Repository but
@@ -129,6 +189,9 @@ type ExecuteRequest struct {
 	ProjectID       string
 	OrgID           string
 	UserMessage     string
+	// RejectMessage carries an optional human-written reason attached to a
+	// tool-policy rejection, surfaced to the agent in the rejected result.
+	RejectMessage   string
 	ParentRunID     *string
 	RootRunID       *string // top-level orchestration run ID; propagated unchanged through all sub-agent spawns
 	MaxSteps        *int
@@ -952,9 +1015,11 @@ func (ae *AgentExecutor) injectToolResponse(ctx context.Context, rootRunID, proj
 		// User responded to a tool-policy confirmation question.
 		// "approve" (case-insensitive) → execute the tool directly using the saved args,
 		// inject the real tool result as a FunctionResponse (no LLM re-ask needed).
-		// Anything else → inject an error FunctionResponse so the LLM knows it was rejected.
+		// "cancel" → inject a structured "not taken" result (revoked).
+		// Anything else → inject a structured rejected result (with optional reason).
 		userResp := strings.TrimSpace(strings.ToLower(req.UserMessage))
-		if userResp == "approve" {
+		switch userResp {
+		case "approve":
 			// Execute the tool directly using the saved args — bypass ADK runner loop entirely.
 			toolResult, callErr := ae.toolPool.CallTool(ctx, projectID, sc.PendingToolName, sc.PendingToolConfirmArgs)
 			if callErr != nil {
@@ -972,13 +1037,19 @@ func (ae *AgentExecutor) injectToolResponse(ctx context.Context, rootRunID, proj
 				slog.Any("args", sc.PendingToolConfirmArgs),
 				slog.Any("result", responseBody),
 			)
-		} else {
-			reason := req.UserMessage
-			if reason == "" {
-				reason = "no reason provided"
-			}
+		case "cancel":
+			// Revoked: the call was not taken; the agent continues without it.
+			responseBody["policy_decision"] = "cancelled"
+			responseBody["status"] = "not_taken"
+		default:
+			// Rejected: deliver a structured result (not an error) so the agent
+			// reads it as a policy decision ("stop this direction") rather than
+			// a retryable failure.
+			responseBody["policy_decision"] = "rejected"
 			responseBody["status"] = "rejected"
-			responseBody["error"] = fmt.Sprintf("Action not taken. User rejected with message: %q", reason)
+			if req.RejectMessage != "" {
+				responseBody["reason"] = req.RejectMessage
+			}
 		}
 	default:
 		responseBody["answer"] = req.UserMessage
@@ -1621,70 +1692,100 @@ func (ae *AgentExecutor) runPipeline(
 			})
 		}
 
-		// Check tool policy — Disabled:true hard-blocks the tool (policy enforcement).
+		// Resolve the effective tool policy (explicit entry, else the agent default).
+		var policy ToolPolicy
+		var hasPolicy bool
 		if req.AgentDefinition != nil {
-			if policy, ok := req.AgentDefinition.ToolPolicies[t.Name()]; ok && policy.Disabled {
-				ae.log.Info("tool_policy: tool disabled by policy, blocking call",
-					slog.String("run_id", run.ID),
-					slog.String("tool", t.Name()),
-				)
-				return map[string]any{
-					"error":  fmt.Sprintf("tool %q is disabled by schema policy and cannot be called", t.Name()),
-					"policy": "disabled",
-				}, nil
-			}
+			policy, hasPolicy = req.AgentDefinition.effectiveToolPolicy(t.Name())
 		}
 
-		// Check tool policy — if Confirm:true, pause the run and ask the user.
-		if req.AgentDefinition != nil {
-			if policy, ok := req.AgentDefinition.ToolPolicies[t.Name()]; ok && policy.Confirm {
-				// If this tool was pre-approved on resume, allow it through once.
-				bypassed := false
-				if req.PreApprovedToolName == t.Name() {
-					preApprovedUsed.Do(func() { bypassed = true })
+		// Disabled (deny): hard-block the tool before execution (policy enforcement).
+		if hasPolicy && policy.Disabled {
+			ae.log.Info("tool_policy: tool disabled by policy, blocking call",
+				slog.String("run_id", run.ID),
+				slog.String("tool", t.Name()),
+			)
+			return map[string]any{
+				"error":  fmt.Sprintf("tool %q is disabled by policy and cannot be called", t.Name()),
+				"policy": "disabled",
+			}, nil
+		}
+
+		// Confirm (ask): pause the run and ask the user before executing.
+		if hasPolicy && policy.Confirm {
+			// If this tool was pre-approved on resume, allow it through once.
+			bypassed := false
+			if req.PreApprovedToolName == t.Name() {
+				preApprovedUsed.Do(func() { bypassed = true })
+			}
+			if !bypassed {
+				msg := policy.Message
+				if msg == "" {
+					msg = fmt.Sprintf("Agent wants to call tool **%s**. Do you approve?", t.Name())
 				}
-				if !bypassed {
-					msg := policy.Message
-					if msg == "" {
-						msg = fmt.Sprintf("Agent wants to call tool **%s**. Do you approve?", t.Name())
-					}
-					q, qErr := CreateAndEmitQuestion(tCtx, CreateQuestionParams{
-						Repo:      ae.repo,
-						Logger:    ae.log,
-						ProjectID: req.ProjectID,
-						AgentID:   agentID,
-						RunID:     run.ID,
-						UserID:    req.UserID,
-						EventsSvc: ae.eventsSvc,
-						Question:  msg,
-						Options: []AgentQuestionOption{
-							{Label: "Approve", Value: "approve"},
-							{Label: "Reject", Value: "reject"},
-						},
-						InteractionType: QuestionInteractionButtons,
-					})
-					if qErr != nil {
-						ae.log.Warn("tool_policy: failed to create confirmation question, proceeding without confirmation",
-							slog.String("run_id", run.ID),
-							slog.String("tool", t.Name()),
-							slog.String("error", qErr.Error()),
-						)
-						// Fall through and let the tool execute
-						return nil, nil
-					}
-					ae.log.Info("tool_policy: confirmation required, pausing run",
+				q, qErr := CreateAndEmitQuestion(tCtx, CreateQuestionParams{
+					Repo:      ae.repo,
+					Logger:    ae.log,
+					ProjectID: req.ProjectID,
+					AgentID:   agentID,
+					RunID:     run.ID,
+					UserID:    req.UserID,
+					EventsSvc: ae.eventsSvc,
+					Question:  msg,
+					Options: []AgentQuestionOption{
+						{Label: "Approve", Value: "approve"},
+						{Label: "Reject", Value: "reject"},
+					},
+					InteractionType: QuestionInteractionButtons,
+				})
+				if qErr != nil {
+					ae.log.Warn("tool_policy: failed to create confirmation question, proceeding without confirmation",
 						slog.String("run_id", run.ID),
 						slog.String("tool", t.Name()),
-						slog.String("question_id", q.ID),
+						slog.String("error", qErr.Error()),
 					)
-					toolConfirmState.RequestConfirm(q.ID, t.Name(), args)
-					// Return synthetic result — skips actual tool.Run(); afterToolCb will still fire.
-					return map[string]any{
-						"status":      "awaiting_confirmation",
-						"question_id": q.ID,
-						"message":     "Tool execution paused, awaiting user confirmation.",
-					}, nil
+					// Fall through and let the tool execute
+					return nil, nil
 				}
+				// Record the pending approval for the audit trail (args redacted).
+				approval := &AgentToolApproval{
+					RunID:       run.ID,
+					ProjectID:   req.ProjectID,
+					AgentID:     agentID,
+					QuestionID:  q.ID,
+					ToolName:    t.Name(),
+					ArgsSummary: redactToolArgs(args),
+					Decision:    "pending",
+				}
+				if aErr := ae.repo.CreateToolApproval(tCtx, approval); aErr != nil {
+					ae.log.Warn("tool_policy: failed to record approval, continuing",
+						slog.String("run_id", run.ID),
+						slog.String("tool", t.Name()),
+						slog.String("error", aErr.Error()),
+					)
+				}
+				// Emit an in-stream approval event so the gateway can surface an
+				// approval card in the chat stream (in addition to the out-of-band notice).
+				if req.StreamCallback != nil {
+					req.StreamCallback(StreamEvent{
+						Type:       StreamEventToolApproval,
+						Tool:       t.Name(),
+						Input:      args,
+						QuestionID: q.ID,
+					})
+				}
+				ae.log.Info("tool_policy: confirmation required, pausing run",
+					slog.String("run_id", run.ID),
+					slog.String("tool", t.Name()),
+					slog.String("question_id", q.ID),
+				)
+				toolConfirmState.RequestConfirm(q.ID, t.Name(), args)
+				// Return synthetic result — skips actual tool.Run(); afterToolCb will still fire.
+				return map[string]any{
+					"status":      "awaiting_confirmation",
+					"question_id": q.ID,
+					"message":     "Tool execution paused, awaiting user confirmation.",
+				}, nil
 			}
 		}
 
@@ -2297,10 +2398,22 @@ func (ae *AgentExecutor) runPipeline(
 				}, nil
 			}
 
-			// Stream partial text deltas to the callback
+			// Stream partial text deltas to the callback. Thought (reasoning) parts
+			// are emitted as thinking events rather than answer tokens, so a
+			// provider that streams chain-of-thought incrementally never leaks
+			// reasoning into the final answer stream.
 			if event.Partial && event.Content != nil && req.StreamCallback != nil {
 				for _, part := range event.Content.Parts {
-					if part != nil && part.Text != "" {
+					if part == nil || part.Text == "" {
+						continue
+					}
+					if part.Thought {
+						req.StreamCallback(StreamEvent{
+							Type: StreamEventThinking,
+							Role: "reasoning",
+							Text: part.Text,
+						})
+					} else {
 						req.StreamCallback(StreamEvent{
 							Type: StreamEventTextDelta,
 							Text: part.Text,
@@ -2314,14 +2427,46 @@ func (ae *AgentExecutor) runPipeline(
 				ae.persistEventContent(dbCtx, run.ID, event, tracker.current())
 			}
 
+			// Stream the agent's reasoning/planning text (non-final assistant
+			// text) as thinking events so callers can surface it separately from
+			// the final answer. Thought parts → "reasoning"; regular text (the
+			// pre-tool planning monologue) → "operator".
+			if event.Content != nil && !event.Partial && !event.IsFinalResponse() && req.StreamCallback != nil {
+				operatorText, reasoningText := thinkingTexts(event.Content.Parts)
+				if len(operatorText) > 0 {
+					req.StreamCallback(StreamEvent{
+						Type: StreamEventThinking,
+						Role: "operator",
+						Text: strings.Join(operatorText, "\n"),
+					})
+				}
+				if len(reasoningText) > 0 {
+					req.StreamCallback(StreamEvent{
+						Type: StreamEventThinking,
+						Role: "reasoning",
+						Text: strings.Join(reasoningText, "\n"),
+					})
+				}
+			}
+
 			if event.IsFinalResponse() {
 				lastEvent = event
-				// Emit final text response to the stream callback so callers receive
-				// token events for the agent's answer. Thought/reasoning parts are
-				// skipped — only the actual response text is streamed.
+				// Emit the final answer as token events. Thought (reasoning) parts
+				// are surfaced as thinking events rather than dropped, so a reasoner
+				// that returns chain-of-thought alongside its final answer is not
+				// silently stripped.
 				if event.Content != nil && req.StreamCallback != nil {
 					for _, part := range event.Content.Parts {
-						if part != nil && part.Text != "" && !part.Thought {
+						if part == nil || part.Text == "" {
+							continue
+						}
+						if part.Thought {
+							req.StreamCallback(StreamEvent{
+								Type: StreamEventThinking,
+								Role: "reasoning",
+								Text: part.Text,
+							})
+						} else {
 							req.StreamCallback(StreamEvent{
 								Type: StreamEventTextDelta,
 								Text: part.Text,
@@ -2811,6 +2956,10 @@ func (ae *AgentExecutor) resolveDescription(req ExecuteRequest) string {
 // If the agent definition declares skills, an <available_skills> index is
 // appended so the agent sees all bound skills before it starts reasoning
 // (zero-turn discovery) rather than only through the skill tool description.
+// toolPolicyResultInstruction teaches the model how to interpret structured
+// tool-policy outcomes injected by the executor (approve/reject/cancel).
+const toolPolicyResultInstruction = `Tool policy: some of your tool calls may require human approval before executing. When a tool result contains "policy_decision": "rejected", the human declined that action — do not retry it and do not attempt to accomplish it another way; stop that direction. When it contains "policy_decision": "cancelled" or "status": "not_taken", the action was withdrawn — continue without it. Only proceed with a tool when its result reflects actual execution.`
+
 func (ae *AgentExecutor) resolveInstruction(req ExecuteRequest) string {
 	inst := ""
 	if req.AgentDefinition != nil && req.AgentDefinition.SystemPrompt != nil {
@@ -2829,7 +2978,23 @@ func (ae *AgentExecutor) resolveInstruction(req ExecuteRequest) string {
 		inst += "\n\n" + req.SystemPromptAppendix
 	}
 
+	// If tool policies can reject or cancel a tool call, tell the model how to
+	// read those structured results so a "rejected" result stops the direction
+	// rather than being retried as a transient failure.
+	if req.AgentDefinition != nil && hasToolPolicy(req.AgentDefinition) {
+		inst += "\n\n" + toolPolicyResultInstruction
+	}
+
 	return inst
+}
+
+// hasToolPolicy reports whether the agent definition configures any tool policy
+// that could reject or cancel a tool call.
+func hasToolPolicy(d *AgentDefinition) bool {
+	if len(d.ToolPolicies) > 0 {
+		return true
+	}
+	return d.DefaultToolPolicy == ToolPolicyDefaultDeny || d.DefaultToolPolicy == ToolPolicyDefaultAsk
 }
 
 // buildSkillsSystemPrompt builds the <available_skills> block that is appended
