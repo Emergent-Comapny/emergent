@@ -133,6 +133,13 @@ func (s *Service) applyPacks(ctx context.Context, projectID, blueprintID, userID
 		pack, err := s.schemasRepo.GetPackByNameVersion(ctx, p.Name, p.Version)
 		switch {
 		case err == nil:
+			// Pack exists globally. Sync its definition (description + type
+			// schemas) from the manifest so source cleanups propagate without a
+			// version bump. Only the owning project can update; a non-owner 404
+			// is benign (the pack still assigns below).
+			if uerr := s.updateExistingPack(ctx, projectID, pack, p); uerr != nil && !isNotFound(uerr) {
+				return counts, uerr
+			}
 			counts.Skipped++ // pack already exists globally; still assign below
 		case isNotFound(err):
 			objectTypes, err := json.Marshal(p.ObjectTypes)
@@ -178,6 +185,28 @@ func (s *Service) applyPacks(ctx context.Context, projectID, blueprintID, userID
 		}
 	}
 	return counts, nil
+}
+
+// updateExistingPack syncs an already-existing global pack's definition
+// (description + object/relationship type schemas) with the current manifest.
+// This propagates source cleanups (e.g. removed template hints from type
+// descriptions) to the registry without requiring a version bump. Only the
+// owning project can update; a non-owner returns ErrNotFound (benign).
+func (s *Service) updateExistingPack(ctx context.Context, projectID string, pack *schemas.GraphMemorySchema, p PackManifest) error {
+	objectTypes, err := json.Marshal(p.ObjectTypes)
+	if err != nil {
+		return apperror.ErrBadRequest.WithMessage("invalid objectTypes in pack " + p.Name)
+	}
+	relationshipTypes, err := json.Marshal(p.RelationshipTypes)
+	if err != nil {
+		return apperror.ErrBadRequest.WithMessage("invalid relationshipTypes in pack " + p.Name)
+	}
+	_, err = s.schemasSvc.UpdatePack(ctx, pack.ID, projectID, &schemas.UpdatePackRequest{
+		Description:             &p.Description,
+		ObjectTypeSchemas:       objectTypes,
+		RelationshipTypeSchemas: relationshipTypes,
+	})
+	return err
 }
 
 // applyAgents creates or updates agent definitions by name within the project.
