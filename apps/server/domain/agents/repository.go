@@ -1510,6 +1510,46 @@ func (r *Repository) UpdateSuspendContext(ctx context.Context, runID string, sc 
 	return err
 }
 
+// MarkToolConfirmationDecision atomically records a tool-policy confirmation
+// decision in the run's suspend_context batch and reports whether every
+// confirmation in the batch is now decided (resume=true). Uses FOR UPDATE on
+// the run row so concurrent answers serialize and exactly one caller observes
+// resume=true. Non-batch (legacy single-confirmation) runs report resume=true.
+func (r *Repository) MarkToolConfirmationDecision(ctx context.Context, runID, questionID, decision, message string) (resume bool, err error) {
+	err = r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		run := new(AgentRun)
+		if err := tx.NewSelect().Model(run).Where("id = ?", runID).For("UPDATE").Scan(ctx); err != nil {
+			return fmt.Errorf("lock run for decision: %w", err)
+		}
+		sc := SuspendSignalFromMap(run.SuspendContext)
+		if sc == nil || len(sc.PendingToolConfirmations) == 0 {
+			resume = true
+			return nil
+		}
+		remaining := 0
+		for i := range sc.PendingToolConfirmations {
+			c := &sc.PendingToolConfirmations[i]
+			if c.QuestionID == questionID && c.Decision == "" {
+				c.Decision = decision
+				c.Message = message
+			}
+			if c.Decision == "" {
+				remaining++
+			}
+		}
+		resume = remaining == 0
+		if _, err := tx.NewUpdate().
+			Model((*AgentRun)(nil)).
+			Set("suspend_context = ?", sc.ToMap()).
+			Where("id = ?", runID).
+			Exec(ctx); err != nil {
+			return fmt.Errorf("update suspend_context: %w", err)
+		}
+		return nil
+	})
+	return resume, err
+}
+
 func (r *Repository) PauseRun(ctx context.Context, runID string, stepCount int) error {
 	now := time.Now()
 	_, err := r.db.NewUpdate().

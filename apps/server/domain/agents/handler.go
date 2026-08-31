@@ -2749,6 +2749,7 @@ func (h *Handler) HandleRespondToQuestion(c echo.Context) error {
 		// or "reject") so injectToolResponse can reliably match it. For all other question
 		// types, include Q&A context so the LLM has history.
 		var userMessage string
+		var resumeNow = true
 		sc := SuspendSignalFromMap(run.SuspendContext)
 		if sc != nil && sc.Reason == SuspendReasonAwaitingToolConfirm {
 			// Resolve the option value from the submitted label (or use as-is if it's already a value).
@@ -2768,6 +2769,16 @@ func (h *Handler) HandleRespondToQuestion(c echo.Context) error {
 				decision = "cancelled"
 			}
 			_ = h.repo.UpdateToolApprovalDecision(c.Request().Context(), questionID, decision, req.Message, user.ID)
+			// Batch coordination: mark this decision in suspend_context and
+			// resume only once every confirmation in the batch is decided.
+			if len(sc.PendingToolConfirmations) > 0 {
+				var markErr error
+				resumeNow, markErr = h.repo.MarkToolConfirmationDecision(c.Request().Context(), run.ID, questionID, userMessage, req.Message)
+				if markErr != nil {
+					_ = h.repo.ReopenQuestion(c.Request().Context(), questionID)
+					return apperror.NewInternal("failed to record decision", markErr)
+				}
+			}
 		} else {
 			userMessage = fmt.Sprintf(
 				"Previously you asked: \"%s\"\nThe user responded: \"%s\"\nContinue from where you left off.",
@@ -2775,10 +2786,12 @@ func (h *Handler) HandleRespondToQuestion(c echo.Context) error {
 			)
 		}
 
-		preCreatedRun, err = h.resumeQuestionRun(c, user, run, agent, agentDef, userMessage, req.Message)
-		if err != nil {
-			_ = h.repo.ReopenQuestion(c.Request().Context(), questionID)
-			return err
+		if resumeNow {
+			preCreatedRun, err = h.resumeQuestionRun(c, user, run, agent, agentDef, userMessage, req.Message)
+			if err != nil {
+				_ = h.repo.ReopenQuestion(c.Request().Context(), questionID)
+				return err
+			}
 		}
 	}
 
@@ -2941,6 +2954,7 @@ func (h *Handler) HandleCancelQuestion(c echo.Context) error {
 	}
 
 	var preCreatedRun *AgentRun
+	var resumeNow = true
 	if h.executor != nil {
 		agent, err := h.repo.FindByID(c.Request().Context(), run.AgentID, nil)
 		if err != nil || agent == nil {
@@ -2949,10 +2963,23 @@ func (h *Handler) HandleCancelQuestion(c echo.Context) error {
 		}
 		agentDef, _ := h.repo.ResolveDefinitionForAgent(c.Request().Context(), agent)
 
-		preCreatedRun, err = h.resumeQuestionRun(c, user, run, agent, agentDef, "cancel", "")
-		if err != nil {
-			_ = h.repo.ReopenQuestion(c.Request().Context(), questionID)
-			return err
+		// Batch coordination: mark this cancellation in suspend_context and
+		// resume only once every confirmation in the batch is decided.
+		if sc := SuspendSignalFromMap(run.SuspendContext); sc != nil && len(sc.PendingToolConfirmations) > 0 {
+			var markErr error
+			resumeNow, markErr = h.repo.MarkToolConfirmationDecision(c.Request().Context(), run.ID, questionID, "cancel", "")
+			if markErr != nil {
+				_ = h.repo.ReopenQuestion(c.Request().Context(), questionID)
+				return apperror.NewInternal("failed to record decision", markErr)
+			}
+		}
+
+		if resumeNow {
+			preCreatedRun, err = h.resumeQuestionRun(c, user, run, agent, agentDef, "cancel", "")
+			if err != nil {
+				_ = h.repo.ReopenQuestion(c.Request().Context(), questionID)
+				return err
+			}
 		}
 	}
 
