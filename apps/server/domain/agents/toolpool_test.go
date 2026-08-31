@@ -269,6 +269,24 @@ func TestConvertToolResult(t *testing.T) {
 		assert.Len(t, results, 2)
 	})
 
+	t.Run("numeric scalar result is decoded not re-encoded", func(t *testing.T) {
+		out, err := convertToolResult(&mcp.ToolResult{
+			Content: []mcp.ContentBlock{{Type: "text", Text: `42`}},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, true, out["ok"])
+		assert.Equal(t, float64(42), out["result"])
+	})
+
+	t.Run("boolean scalar result is decoded not re-encoded", func(t *testing.T) {
+		out, err := convertToolResult(&mcp.ToolResult{
+			Content: []mcp.ContentBlock{{Type: "text", Text: `true`}},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, true, out["ok"])
+		assert.Equal(t, true, out["result"])
+	})
+
 	t.Run("non-json text falls back to string result", func(t *testing.T) {
 		out, err := convertToolResult(&mcp.ToolResult{
 			Content: []mcp.ContentBlock{{Type: "text", Text: "hello world"}},
