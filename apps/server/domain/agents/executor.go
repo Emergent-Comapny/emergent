@@ -900,7 +900,7 @@ func (ae *AgentExecutor) Resume(ctx context.Context, priorRun *AgentRun, req Exe
 	// Inject the pending tool result into the ADK session as a proper FunctionResponse,
 	// replacing the legacy text-based prompt injection. This gives the LLM an accurate
 	// view of the tool call/response pair without any synthetic "here is what happened" text.
-	if sc := SuspendSignalFromMap(priorRun.SuspendContext); sc != nil && sc.PendingToolCallID != "" {
+	if sc := SuspendSignalFromMap(priorRun.SuspendContext); sc != nil && (sc.PendingToolCallID != "" || len(sc.PendingToolConfirmations) > 0) {
 		// Ensure auth context has OrgID/ProjectID before calling tools directly (e.g. finalize-discovery
 		// reads org_id from context — without this injection it gets empty string and fails uuid.Parse).
 		if req.OrgID != "" {
