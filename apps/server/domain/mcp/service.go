@@ -1972,7 +1972,8 @@ func (s *Service) ExecuteTool(ctx context.Context, projectID string, toolName st
 
 	// Blueprint tools (delegated to the blueprints domain via BlueprintToolHandler)
 	case "blueprint-create", "blueprint-list", "blueprint-get", "blueprint-publish",
-		"blueprint-apply", "blueprint-unapply", "blueprint-versions", "blueprint-list-applied":
+		"blueprint-apply", "blueprint-unapply", "blueprint-versions", "blueprint-list-applied",
+		"blueprint-new-version", "blueprint-update":
 		return s.delegateBlueprintTool(ctx, projectID, toolName, args)
 
 	default:
@@ -4790,6 +4791,10 @@ func (s *Service) delegateBlueprintTool(ctx context.Context, projectID, toolName
 		return s.blueprintToolHandler.ExecuteBlueprintVersions(ctx, projectID, args)
 	case "blueprint-list-applied":
 		return s.blueprintToolHandler.ExecuteBlueprintListApplied(ctx, projectID, args)
+	case "blueprint-new-version":
+		return s.blueprintToolHandler.ExecuteBlueprintNewVersion(ctx, projectID, args)
+	case "blueprint-update":
+		return s.blueprintToolHandler.ExecuteBlueprintUpdate(ctx, projectID, args)
 	default:
 		return nil, fmt.Errorf("unknown blueprint tool: %s", toolName)
 	}
