@@ -36,10 +36,10 @@ func TestSuspendSignalBatchRoundTrip(t *testing.T) {
 
 func TestSuspendSignalLegacyBlobCompat(t *testing.T) {
 	legacy := map[string]any{
-		"reason":                   "awaiting_tool_confirm",
-		"question_id":              "q1",
-		"pending_tool_call_id":     "fc1",
-		"pending_tool_name":        "create_note",
+		"reason":                    "awaiting_tool_confirm",
+		"question_id":               "q1",
+		"pending_tool_call_id":      "fc1",
+		"pending_tool_name":         "create_note",
 		"pending_tool_confirm_args": map[string]any{"title": "a"},
 	}
 	sc := SuspendSignalFromMap(legacy)
