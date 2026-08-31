@@ -160,11 +160,15 @@ func (s *Service) applyPacks(ctx context.Context, projectID, blueprintID, userID
 			return counts, err
 		}
 
-		// ALWAYS assign (idempotent; Merge=true additive).
+		// ALWAYS assign (idempotent; Merge=true additive). AutoUninstall makes
+		// the migration worker soft-delete the previous version's assignment
+		// after a successful migration, so the compiled schema view does not
+		// keep duplicated types from every installed version.
 		if _, err := s.schemasSvc.AssignPack(ctx, projectID, userID, &schemas.AssignPackRequest{
 			SchemaID:          pack.ID,
 			Merge:             true,
 			SourceBlueprintID: &blueprintID,
+			AutoUninstall:     true,
 		}); err != nil {
 			return counts, err
 		}
