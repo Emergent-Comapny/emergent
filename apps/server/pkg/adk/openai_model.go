@@ -108,6 +108,10 @@ type openaiRequest struct {
 	// the top-level enable_thinking field does not work correctly (it empties
 	// the response content field).
 	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs,omitempty"`
+	// Thinking is DeepSeek's thinking-mode toggle ({"type":"enabled"|"disabled"}).
+	// DeepSeek ignores chat_template_kwargs (a vLLM/Qwen3 mechanism), so DeepSeek
+	// models must use this top-level field instead to disable thinking.
+	Thinking any `json:"thinking,omitempty"`
 }
 
 type responseFormat struct {
@@ -202,6 +206,13 @@ func isReasonerModel(name string) bool {
 		}
 	}
 	return false
+}
+
+// isDeepSeekModel returns true for DeepSeek models. DeepSeek toggles thinking via
+// a top-level `thinking` field and silently ignores chat_template_kwargs (a
+// vLLM/Qwen3 mechanism), so these models need a different disable path.
+func isDeepSeekModel(name string) bool {
+	return strings.Contains(strings.ToLower(name), "deepseek")
 }
 
 // hasSubstantiveToolCall returns true when the conversation history contains a
@@ -532,7 +543,15 @@ func (m *openaiCompatibleModel) GenerateContent(ctx context.Context, req *model.
 				wantThinking = false // default: disable when tools present
 			}
 			if !wantThinking {
-				body.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
+				if isDeepSeekModel(m.modelName) {
+					// DeepSeek toggles thinking via a top-level `thinking` field; it
+					// ignores chat_template_kwargs. Without this, DeepSeek V4 stays in
+					// thinking mode, emits reasoning_content, and — because tools are
+					// present — requires it echoed back on every turn, else 400.
+					body.Thinking = map[string]any{"type": "disabled"}
+				} else {
+					body.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
+				}
 			}
 		}
 
