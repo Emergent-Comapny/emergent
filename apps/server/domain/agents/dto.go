@@ -593,35 +593,37 @@ func (q *AgentQuestion) ToDTO() *AgentQuestionDTO {
 // AgentToolApprovalDTO is the API response shape for a tool-approval audit
 // record.
 type AgentToolApprovalDTO struct {
-	ID          string         `json:"id"`
-	RunID       string         `json:"runId"`
-	AgentID     string         `json:"agentId"`
-	ProjectID   string         `json:"projectId"`
-	QuestionID  string         `json:"questionId"`
-	ToolName    string         `json:"toolName"`
-	ArgsSummary map[string]any `json:"argsSummary"`
-	Decision    string         `json:"decision"`
-	Message     string         `json:"message,omitempty"`
-	DecidedBy   *string        `json:"decidedBy,omitempty"`
-	DecidedAt   *time.Time     `json:"decidedAt,omitempty"`
-	CreatedAt   time.Time      `json:"createdAt"`
+	ID             string         `json:"id"`
+	RunID          string         `json:"runId"`
+	AgentID        string         `json:"agentId"`
+	ProjectID      string         `json:"projectId"`
+	QuestionID     string         `json:"questionId"`
+	ToolName       string         `json:"toolName"`
+	ArgsSummary    map[string]any `json:"argsSummary"`
+	Decision       string         `json:"decision"`
+	Message        string         `json:"message,omitempty"`
+	DecidedBy      *string        `json:"decidedBy,omitempty"`
+	DecidedAt      *time.Time     `json:"decidedAt,omitempty"`
+	ConversationID *string        `json:"conversationId,omitempty"`
+	CreatedAt      time.Time      `json:"createdAt"`
 }
 
 // ToDTO converts an AgentToolApproval entity to a DTO.
 func (a *AgentToolApproval) ToDTO() *AgentToolApprovalDTO {
 	return &AgentToolApprovalDTO{
-		ID:          a.ID,
-		RunID:       a.RunID,
-		AgentID:     a.AgentID,
-		ProjectID:   a.ProjectID,
-		QuestionID:  a.QuestionID,
-		ToolName:    a.ToolName,
-		ArgsSummary: a.ArgsSummary,
-		Decision:    a.Decision,
-		Message:     a.Message,
-		DecidedBy:   a.DecidedBy,
-		DecidedAt:   a.DecidedAt,
-		CreatedAt:   a.CreatedAt,
+		ID:             a.ID,
+		RunID:          a.RunID,
+		AgentID:        a.AgentID,
+		ProjectID:      a.ProjectID,
+		QuestionID:     a.QuestionID,
+		ToolName:       a.ToolName,
+		ArgsSummary:    a.ArgsSummary,
+		Decision:       a.Decision,
+		Message:        a.Message,
+		DecidedBy:      a.DecidedBy,
+		DecidedAt:      a.DecidedAt,
+		ConversationID: a.ConversationID,
+		CreatedAt:      a.CreatedAt,
 	}
 }
 
