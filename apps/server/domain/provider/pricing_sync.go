@@ -163,6 +163,10 @@ func parsePricingEntries(raw []pricingEntry) []ProviderPricing {
 			pt = ProviderGoogleAI
 		case "google-vertex":
 			pt = ProviderVertexAI
+		case "openai":
+			pt = ProviderOpenAI
+		case "deepseek":
+			pt = ProviderDeepSeek
 		default:
 			continue // skip unknown providers
 		}

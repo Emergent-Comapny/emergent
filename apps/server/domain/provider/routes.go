@@ -20,6 +20,9 @@ import (
 //	POST   /api/v1/providers/:provider/test                   — live credential test
 //	GET    /api/v1/users/me/usage                             — current user usage summary
 //	GET    /api/v1/users/me/usage/timeseries                  — current user usage time series
+//	GET    /api/v1/projects/:projectId/pricing-overrides      — list project pricing overrides
+//	PUT    /api/v1/projects/:projectId/pricing-overrides      — upsert a project pricing override
+//	DELETE /api/v1/projects/:projectId/pricing-overrides/:provider/:model — delete a project pricing override
 func RegisterRoutes(e *echo.Echo, h *Handler, authMiddleware *auth.Middleware) {
 	api := e.Group("/api/v1")
 	api.Use(authMiddleware.RequireAuth())
@@ -43,6 +46,11 @@ func RegisterRoutes(e *echo.Echo, h *Handler, authMiddleware *auth.Middleware) {
 	// Project-level usage summary and timeseries
 	api.GET("/projects/:projectId/usage", h.GetProjectUsageSummary)
 	api.GET("/projects/:projectId/usage/timeseries", h.GetProjectUsageTimeSeries)
+
+	// Project-level pricing overrides
+	api.GET("/projects/:projectId/pricing-overrides", h.ListProjectPricingOverrides)
+	api.PUT("/projects/:projectId/pricing-overrides", h.UpsertProjectPricingOverrides)
+	api.DELETE("/projects/:projectId/pricing-overrides/:provider/:model", h.DeleteProjectPricingOverride)
 
 	// Current-user usage summary and timeseries
 	api.GET("/users/me/usage", h.GetCurrentUserUsageSummary)

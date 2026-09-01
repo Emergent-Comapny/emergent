@@ -2105,6 +2105,25 @@ CREATE TABLE kb.project_object_schema_registry (
 
 
 --
+-- Name: project_custom_pricing; Type: TABLE; Schema: kb; Owner: -
+--
+
+CREATE TABLE kb.project_custom_pricing (
+    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+    project_id uuid NOT NULL,
+    provider character varying(50) NOT NULL,
+    model character varying(255) NOT NULL,
+    text_input_price numeric(12,8) DEFAULT 0 NOT NULL,
+    image_input_price numeric(12,8) DEFAULT 0 NOT NULL,
+    video_input_price numeric(12,8) DEFAULT 0 NOT NULL,
+    audio_input_price numeric(12,8) DEFAULT 0 NOT NULL,
+    output_price numeric(12,8) DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: project_provider_configs; Type: TABLE; Schema: kb; Owner: -
 --
 
@@ -3252,6 +3271,14 @@ ALTER TABLE ONLY kb.project_object_schema_registry
 
 
 --
+-- Name: project_custom_pricing project_custom_pricing_pkey; Type: CONSTRAINT; Schema: kb; Owner: -
+--
+
+ALTER TABLE ONLY kb.project_custom_pricing
+    ADD CONSTRAINT project_custom_pricing_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: project_provider_configs project_provider_configs_pkey; Type: CONSTRAINT; Schema: kb; Owner: -
 --
 
@@ -3425,6 +3452,14 @@ ALTER TABLE ONLY kb.tasks
 
 ALTER TABLE ONLY kb.organization_custom_pricing
     ADD CONSTRAINT uq_org_custom_pricing UNIQUE (org_id, provider, model);
+
+
+--
+-- Name: project_custom_pricing uq_project_custom_pricing; Type: CONSTRAINT; Schema: kb; Owner: -
+--
+
+ALTER TABLE ONLY kb.project_custom_pricing
+    ADD CONSTRAINT uq_project_custom_pricing UNIQUE (project_id, provider, model);
 
 
 --
@@ -4703,6 +4738,13 @@ CREATE INDEX idx_project_journal_notes_journal ON kb.project_journal_notes USING
 
 
 --
+-- Name: idx_project_custom_pricing_project_id; Type: INDEX; Schema: kb; Owner: -
+--
+
+CREATE INDEX idx_project_custom_pricing_project_id ON kb.project_custom_pricing USING btree (project_id);
+
+
+--
 -- Name: idx_project_journal_notes_project; Type: INDEX; Schema: kb; Owner: -
 --
 
@@ -5742,6 +5784,14 @@ ALTER TABLE ONLY kb.project_model_config
 
 ALTER TABLE ONLY kb.project_object_schema_registry
     ADD CONSTRAINT project_object_schema_registry_project_id_fkey FOREIGN KEY (project_id) REFERENCES kb.projects(id) ON DELETE CASCADE;
+
+
+--
+-- Name: project_custom_pricing project_custom_pricing_project_id_fkey; Type: FK CONSTRAINT; Schema: kb; Owner: -
+--
+
+ALTER TABLE ONLY kb.project_custom_pricing
+    ADD CONSTRAINT project_custom_pricing_project_id_fkey FOREIGN KEY (project_id) REFERENCES kb.projects(id) ON DELETE CASCADE;
 
 
 --
