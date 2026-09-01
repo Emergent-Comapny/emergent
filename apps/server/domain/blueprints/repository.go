@@ -27,16 +27,26 @@ func NewRepository(db bun.IDB, log *slog.Logger) *Repository {
 	}
 }
 
+// scopeWhere returns the read-scope WHERE condition and its bind args for the
+// caller's project: global blueprints plus the caller's own private ones when
+// projectID is non-empty; global-only when projectID is empty.
+func scopeWhere(projectID string) (string, []any) {
+	if projectID == "" {
+		return "project_id IS NULL", nil
+	}
+	return "(project_id IS NULL OR project_id = ?)", []any{projectID}
+}
+
 // Create inserts a new blueprint row.
-// Duplicate (name, version) is enforced atomically by the database via
-// ON CONFLICT DO NOTHING (backed by the blueprints_name_version_key unique
-// constraint); RowsAffected == 0 means the row already exists. The service's
-// ExistsByNameVersion pre-check is only a friendly fast path, not the
+// Duplicate (name, version) within the blueprint's scope is enforced atomically
+// by the database via ON CONFLICT DO NOTHING (backed by the partial unique
+// indexes on project_id); RowsAffected == 0 means the row already exists. The
+// service's ExistsByNameVersion pre-check is only a friendly fast path, not the
 // enforcement.
 func (r *Repository) Create(ctx context.Context, bp *Blueprint) error {
 	result, err := r.db.NewInsert().
 		Model(bp).
-		On("CONFLICT (name, version) DO NOTHING").
+		On("CONFLICT DO NOTHING").
 		Returning("id").
 		Exec(ctx)
 	if err != nil {
@@ -52,12 +62,15 @@ func (r *Repository) Create(ctx context.Context, bp *Blueprint) error {
 	return nil
 }
 
-// GetByID returns a blueprint by ID.
-func (r *Repository) GetByID(ctx context.Context, id string) (*Blueprint, error) {
+// GetByID returns a blueprint by ID within the caller's read scope (global +
+// own private). A private blueprint owned by another project is not visible.
+func (r *Repository) GetByID(ctx context.Context, projectID, id string) (*Blueprint, error) {
 	var bp Blueprint
+	cond, args := scopeWhere(projectID)
 	err := r.db.NewSelect().
 		Model(&bp).
 		Where("id = ?", id).
+		Where(cond, args...).
 		Scan(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -69,9 +82,11 @@ func (r *Repository) GetByID(ctx context.Context, id string) (*Blueprint, error)
 	return &bp, nil
 }
 
-// List returns blueprints, optionally filtered by name, ordered by name then version.
-func (r *Repository) List(ctx context.Context, nameFilter string) ([]Blueprint, error) {
-	q := r.db.NewSelect().Model((*Blueprint)(nil))
+// List returns blueprints within the caller's read scope (global + own
+// private), optionally filtered by name, ordered by name then version.
+func (r *Repository) List(ctx context.Context, projectID, nameFilter string) ([]Blueprint, error) {
+	cond, args := scopeWhere(projectID)
+	q := r.db.NewSelect().Model((*Blueprint)(nil)).Where(cond, args...)
 	if nameFilter != "" {
 		q = q.Where("name = ?", nameFilter)
 	}
@@ -133,12 +148,15 @@ func (r *Repository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// ListVersionsByName returns all versions of a blueprint name, ordered by version.
-func (r *Repository) ListVersionsByName(ctx context.Context, name string) ([]Blueprint, error) {
+// ListVersionsByName returns all versions of a blueprint name within the
+// caller's read scope (global + own private), ordered by version.
+func (r *Repository) ListVersionsByName(ctx context.Context, projectID, name string) ([]Blueprint, error) {
+	cond, args := scopeWhere(projectID)
 	var blueprints []Blueprint
 	err := r.db.NewSelect().
 		Model(&blueprints).
 		Where("name = ?", name).
+		Where(cond, args...).
 		Order("version ASC").
 		Scan(ctx)
 	if err != nil {
@@ -173,15 +191,22 @@ func (r *Repository) UpdateStatus(ctx context.Context, id, status, checksum stri
 	return nil
 }
 
-// ExistsByNameVersion reports whether a blueprint with the given name and version exists.
-// This is a friendly fast-path pre-check; the ON CONFLICT clause in Create is
-// the real TOCTOU-safe enforcement.
-func (r *Repository) ExistsByNameVersion(ctx context.Context, name, version string) (bool, error) {
-	exists, err := r.db.NewSelect().
+// ExistsByNameVersion reports whether a blueprint with the given name and
+// version exists in the given scope: nil projectID checks the global scope
+// (project_id IS NULL); a projectID checks only that project's private scope.
+// This is a friendly fast-path pre-check; the partial unique indexes backing
+// ON CONFLICT in Create are the real TOCTOU-safe enforcement.
+func (r *Repository) ExistsByNameVersion(ctx context.Context, projectID *string, name, version string) (bool, error) {
+	q := r.db.NewSelect().
 		Model((*Blueprint)(nil)).
 		Where("name = ?", name).
-		Where("version = ?", version).
-		Exists(ctx)
+		Where("version = ?", version)
+	if projectID == nil {
+		q = q.Where("project_id IS NULL")
+	} else {
+		q = q.Where("project_id = ?", *projectID)
+	}
+	exists, err := q.Exists(ctx)
 	if err != nil {
 		r.log.Error("failed to check blueprint existence", logger.Error(err))
 		return false, apperror.ErrDatabase.WithInternal(err)
