@@ -703,11 +703,19 @@ func (h *Handler) TriggerAgent(c echo.Context) error {
 		modelOverride = &triggerReq.Model
 	}
 
+	// Record which definition the run resolved to, so the run's
+	// agent_definition_id matches the definition actually used at execution.
+	var agentDefID *string
+	if agentDef != nil {
+		agentDefID = &agentDef.ID
+	}
+
 	run, err := h.repo.CreateRunWithOptions(c.Request().Context(), CreateRunOptions{
-		AgentID:         agent.ID,
-		TriggerSource:   &triggerSource,
-		TriggerMetadata: triggerReq.Context,
-		Model:           modelOverride,
+		AgentID:           agent.ID,
+		TriggerSource:     &triggerSource,
+		TriggerMetadata:   triggerReq.Context,
+		Model:             modelOverride,
+		AgentDefinitionID: agentDefID,
 	})
 	if err != nil {
 		return apperror.NewInternal("failed to create agent run", err)
