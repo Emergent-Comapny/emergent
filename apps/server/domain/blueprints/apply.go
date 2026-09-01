@@ -205,6 +205,7 @@ func (s *Service) updateExistingPack(ctx context.Context, projectID string, pack
 		Description:             &p.Description,
 		ObjectTypeSchemas:       objectTypes,
 		RelationshipTypeSchemas: relationshipTypes,
+		Migrations:              p.Migrations,
 	})
 	return err
 }
