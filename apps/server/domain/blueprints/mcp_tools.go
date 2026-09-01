@@ -192,3 +192,52 @@ func (h *MCPBlueprintToolHandler) ExecuteBlueprintListApplied(ctx context.Contex
 	}
 	return h.wrapResult(apps)
 }
+
+// ExecuteBlueprintNewVersion clones a blueprint (global built-in or the
+// caller's own) into a new private draft version in the caller's project.
+func (h *MCPBlueprintToolHandler) ExecuteBlueprintNewVersion(ctx context.Context, projectID string, args map[string]any) (*mcp.ToolResult, error) {
+	id, _ := args["id"].(string)
+	if id == "" {
+		return errResult("id is required")
+	}
+	version, _ := args["version"].(string)
+	if version == "" {
+		return errResult("version is required")
+	}
+
+	bp, err := h.svc.NewVersion(ctx, projectID, id, version)
+	if err != nil {
+		return errResult("failed to create new blueprint version: " + err.Error())
+	}
+	return h.wrapResult(bp)
+}
+
+// ExecuteBlueprintUpdate updates the caller's own private draft blueprint's
+// description, author, and/or manifest. Global blueprints are immutable.
+func (h *MCPBlueprintToolHandler) ExecuteBlueprintUpdate(ctx context.Context, projectID string, args map[string]any) (*mcp.ToolResult, error) {
+	id, _ := args["id"].(string)
+	if id == "" {
+		return errResult("id is required")
+	}
+
+	req := &UpdateBlueprintRequest{}
+	if v, ok := args["description"].(string); ok && v != "" {
+		req.Description = &v
+	}
+	if v, ok := args["author"].(string); ok && v != "" {
+		req.Author = &v
+	}
+	if v, ok := args["manifest"]; ok && v != nil {
+		manifest, err := toRawManifest(v)
+		if err != nil {
+			return errResult("invalid manifest: " + err.Error())
+		}
+		req.Manifest = manifest
+	}
+
+	bp, err := h.svc.UpdateBlueprint(ctx, projectID, id, req)
+	if err != nil {
+		return errResult("failed to update blueprint: " + err.Error())
+	}
+	return h.wrapResult(bp)
+}

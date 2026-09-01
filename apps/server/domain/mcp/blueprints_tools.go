@@ -16,6 +16,8 @@ type BlueprintToolHandler interface {
 	ExecuteBlueprintUnapply(ctx context.Context, projectID string, args map[string]any) (*ToolResult, error)
 	ExecuteBlueprintVersions(ctx context.Context, projectID string, args map[string]any) (*ToolResult, error)
 	ExecuteBlueprintListApplied(ctx context.Context, projectID string, args map[string]any) (*ToolResult, error)
+	ExecuteBlueprintNewVersion(ctx context.Context, projectID string, args map[string]any) (*ToolResult, error)
+	ExecuteBlueprintUpdate(ctx context.Context, projectID string, args map[string]any) (*ToolResult, error)
 }
 
 // ============================================================================
@@ -153,6 +155,52 @@ func blueprintsToolDefinitions() []ToolDefinition {
 				Type:       "object",
 				Properties: map[string]PropertySchema{},
 				Required:   []string{},
+			},
+		},
+		{
+			Name:          "blueprint-new-version",
+			RequiredScope: "schema:write",
+			Description:   "Clone an existing blueprint into a new version as a draft. The source may be a global built-in or your own blueprint; the clone is created as a private draft in your project. Publish it (blueprint-publish) before applying.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]PropertySchema{
+					"id": {
+						Type:        "string",
+						Description: "UUID of the blueprint to clone from",
+					},
+					"version": {
+						Type:        "string",
+						Description: "New semantic version, e.g. '1.1.0'",
+					},
+				},
+				Required: []string{"id", "version"},
+			},
+		},
+		{
+			Name:          "blueprint-update",
+			RequiredScope: "schema:write",
+			Description:   "Update a draft blueprint's description, author, and/or manifest. Only your own private drafts can be updated — global blueprints are immutable; fork one with blueprint-new-version to change it.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]PropertySchema{
+					"id": {
+						Type:        "string",
+						Description: "UUID of the draft blueprint to update",
+					},
+					"description": {
+						Type:        "string",
+						Description: "New description (optional)",
+					},
+					"author": {
+						Type:        "string",
+						Description: "New author (optional)",
+					},
+					"manifest": {
+						Type:        "object",
+						Description: "New manifest as a JSON object or a JSON-encoded string (optional). Describes schema packs, agents, skills, and seed graph objects/relationships to materialize on apply.",
+					},
+				},
+				Required: []string{"id"},
 			},
 		},
 	}
