@@ -812,6 +812,203 @@ func resolveProviderOrgID(c *client.Client, explicit string) (string, error) {
 	return orgs[0].ID, nil
 }
 
+// ── pricing ────────────────────────────────────────────────────────────────────
+
+var providerPricingCmd = &cobra.Command{
+	Use:   "pricing",
+	Short: "Manage project-level pricing overrides",
+	Long: `Manage project-level manual pricing overrides for LLM cost estimation.
+
+Prices are in USD per 1 million tokens and only affect cost estimates for the
+given project (they override global retail pricing for that project).
+
+Subcommands:
+  list     List pricing overrides for a project
+  set      Create or update a pricing override for a project
+  delete   Remove a pricing override from a project
+
+The project is read from --project or the MEMORY_PROJECT_ID environment variable.
+
+Examples:
+  memory provider pricing list --project <id>
+  memory provider pricing set --project <id> --provider deepseek --model deepseek-v4-pro --output 3.50
+  memory provider pricing delete --project <id> --provider deepseek --model deepseek-v4-pro`,
+}
+
+var providerPricingListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List pricing overrides for a project",
+	Long: `List all pricing overrides for a project.
+
+Output is a table with columns: PROVIDER, MODEL, TEXT IN, IMAGE, VIDEO, AUDIO,
+OUTPUT, and UPDATED.
+
+Examples:
+  memory provider pricing list --project <id>
+  memory provider pricing list --project <id> --json`,
+	RunE: runProviderPricingList,
+}
+
+var providerPricingSetCmd = &cobra.Command{
+	Use:   "set",
+	Short: "Set a pricing override for a project",
+	Long: `Create or update a pricing override for a project's provider + model pair.
+
+Prices are in USD per 1 million tokens. Omitted prices default to 0.
+
+Examples:
+  memory provider pricing set --project <id> --provider deepseek --model deepseek-v4-pro --output 3.50
+  memory provider pricing set --project <id> --provider openai --model gpt-4o --text-input 2.50 --output 10.00`,
+	RunE: runProviderPricingSet,
+}
+
+var providerPricingDeleteCmd = &cobra.Command{
+	Use:   "delete",
+	Short: "Delete a pricing override from a project",
+	Long: `Remove a pricing override for a project's provider + model pair. After
+deletion the project falls back to global retail pricing for that model.
+
+Examples:
+  memory provider pricing delete --project <id> --provider deepseek --model deepseek-v4-pro`,
+	RunE: runProviderPricingDelete,
+}
+
+var (
+	pricingProjectID  string
+	pricingProvider   string
+	pricingModel      string
+	pricingTextInput  float64
+	pricingImageInput float64
+	pricingVideoInput float64
+	pricingAudioInput float64
+	pricingOutput     float64
+	pricingJSONFlag   bool
+)
+
+// resolvePricingProjectID returns the target project ID: --project flag, then
+// the MEMORY_PROJECT_ID environment variable.
+func resolvePricingProjectID() (string, error) {
+	projectID := pricingProjectID
+	if projectID == "" {
+		projectID = os.Getenv("MEMORY_PROJECT_ID")
+	}
+	if projectID == "" {
+		return "", fmt.Errorf("--project is required (or set MEMORY_PROJECT_ID / MEMORY_PROJECT in .env.local)")
+	}
+	return projectID, nil
+}
+
+func runProviderPricingList(cmd *cobra.Command, _ []string) error {
+	c, err := getClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	projectID, err := resolvePricingProjectID()
+	if err != nil {
+		return err
+	}
+
+	overrides, err := c.SDK.Provider.ListProjectPricingOverrides(context.Background(), projectID)
+	if err != nil {
+		return fmt.Errorf("failed to list pricing overrides: %w", err)
+	}
+
+	if pricingJSONFlag || output == "json" {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(overrides)
+	}
+
+	if len(overrides) == 0 {
+		fmt.Printf("No pricing overrides for project %s.\n", projectID)
+		return nil
+	}
+
+	t := internalui.NewTable(internalui.TableConfig{Compact: true})
+	t.SetHeaders([]string{"PROVIDER", "MODEL", "TEXT IN", "IMAGE", "VIDEO", "AUDIO", "OUTPUT", "UPDATED"})
+	for _, o := range overrides {
+		t.AddRow([]string{
+			o.Provider,
+			o.Model,
+			fmt.Sprintf("$%.6f", o.TextInputPrice),
+			fmt.Sprintf("$%.6f", o.ImageInputPrice),
+			fmt.Sprintf("$%.6f", o.VideoInputPrice),
+			fmt.Sprintf("$%.6f", o.AudioInputPrice),
+			fmt.Sprintf("$%.6f", o.OutputPrice),
+			fmtTime(o.UpdatedAt),
+		})
+	}
+	fmt.Print(t.Render())
+	return nil
+}
+
+func runProviderPricingSet(cmd *cobra.Command, _ []string) error {
+	c, err := getClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	projectID, err := resolvePricingProjectID()
+	if err != nil {
+		return err
+	}
+	if pricingProvider == "" {
+		return fmt.Errorf("--provider is required")
+	}
+	if pricingModel == "" {
+		return fmt.Errorf("--model is required")
+	}
+
+	req := &provider.UpsertProjectPricingOverrideRequest{
+		Provider:        pricingProvider,
+		Model:           pricingModel,
+		TextInputPrice:  pricingTextInput,
+		ImageInputPrice: pricingImageInput,
+		VideoInputPrice: pricingVideoInput,
+		AudioInputPrice: pricingAudioInput,
+		OutputPrice:     pricingOutput,
+	}
+
+	override, err := c.SDK.Provider.UpsertProjectPricingOverride(context.Background(), projectID, req)
+	if err != nil {
+		return fmt.Errorf("failed to set pricing override: %w", err)
+	}
+
+	fmt.Printf("Pricing override set for %s/%s on project %s.\n", override.Provider, override.Model, projectID)
+	if pricingJSONFlag || output == "json" {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(override)
+	}
+	return nil
+}
+
+func runProviderPricingDelete(cmd *cobra.Command, _ []string) error {
+	c, err := getClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	projectID, err := resolvePricingProjectID()
+	if err != nil {
+		return err
+	}
+	if pricingProvider == "" {
+		return fmt.Errorf("--provider is required")
+	}
+	if pricingModel == "" {
+		return fmt.Errorf("--model is required")
+	}
+
+	if err := c.SDK.Provider.DeleteProjectPricingOverride(context.Background(), projectID, pricingProvider, pricingModel); err != nil {
+		return fmt.Errorf("failed to delete pricing override: %w", err)
+	}
+
+	fmt.Printf("Pricing override deleted for %s/%s on project %s.\n", pricingProvider, pricingModel, projectID)
+	return nil
+}
+
 func init() {
 	// configure-project flags
 	configureProjectCmd.Flags().StringVar(&configureProjectAPIKey, "api-key", "", "API key (required for google)")
@@ -853,6 +1050,22 @@ func init() {
 	providerListCmd.Flags().BoolVar(&listJSONFlag, "json", false, "Output raw JSON")
 	providerListCmd.Flags().StringVar(&listProjectID, "project", "", "Filter to a specific project (name or ID)")
 
+	// pricing flags
+	providerPricingListCmd.Flags().StringVar(&pricingProjectID, "project", "", "Project ID (auto-detected from MEMORY_PROJECT_ID)")
+	providerPricingListCmd.Flags().BoolVar(&pricingJSONFlag, "json", false, "Output raw JSON")
+	providerPricingSetCmd.Flags().StringVar(&pricingProjectID, "project", "", "Project ID (auto-detected from MEMORY_PROJECT_ID)")
+	providerPricingSetCmd.Flags().StringVar(&pricingProvider, "provider", "", "Provider name (google, google-vertex, openai, or deepseek)")
+	providerPricingSetCmd.Flags().StringVar(&pricingModel, "model", "", "Model name")
+	providerPricingSetCmd.Flags().Float64Var(&pricingTextInput, "text-input", 0, "Text input price per 1M tokens (USD)")
+	providerPricingSetCmd.Flags().Float64Var(&pricingImageInput, "image-input", 0, "Image input price per 1M tokens (USD)")
+	providerPricingSetCmd.Flags().Float64Var(&pricingVideoInput, "video-input", 0, "Video input price per 1M tokens (USD)")
+	providerPricingSetCmd.Flags().Float64Var(&pricingAudioInput, "audio-input", 0, "Audio input price per 1M tokens (USD)")
+	providerPricingSetCmd.Flags().Float64Var(&pricingOutput, "output", 0, "Output price per 1M tokens (USD)")
+	providerPricingSetCmd.Flags().BoolVar(&pricingJSONFlag, "json", false, "Output raw JSON")
+	providerPricingDeleteCmd.Flags().StringVar(&pricingProjectID, "project", "", "Project ID (auto-detected from MEMORY_PROJECT_ID)")
+	providerPricingDeleteCmd.Flags().StringVar(&pricingProvider, "provider", "", "Provider name (google, google-vertex, openai, or deepseek)")
+	providerPricingDeleteCmd.Flags().StringVar(&pricingModel, "model", "", "Model name")
+
 	// Wire sub-commands
 	providerCmd.AddCommand(configureProjectCmd)
 	providerCmd.AddCommand(providerListCmd)
@@ -860,6 +1073,10 @@ func init() {
 	providerCmd.AddCommand(providerUsageCmd)
 	providerCmd.AddCommand(providerUsageTimeseriesCmd)
 	providerCmd.AddCommand(providerTestCmd)
+	providerCmd.AddCommand(providerPricingCmd)
+	providerPricingCmd.AddCommand(providerPricingListCmd)
+	providerPricingCmd.AddCommand(providerPricingSetCmd)
+	providerPricingCmd.AddCommand(providerPricingDeleteCmd)
 
 	rootCmd.AddCommand(providerCmd)
 }
