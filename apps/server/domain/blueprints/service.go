@@ -153,14 +153,12 @@ func (s *Service) UpdateBlueprint(ctx context.Context, projectID, id string, req
 // PublishBlueprint transitions a draft to published, computing a sha256
 // checksum over the raw JSON manifest bytes. The checksum is a content hash
 // of the manifest for future apply/drift comparison; it is not verified on
-// read (tamper detection is out of scope for this phase). Only the caller's
-// own private drafts can be published — global blueprints are immutable.
+// read (tamper detection is out of scope for this phase). Allowed on global
+// blueprints — the gateway's built-in seed flow creates a global draft then
+// publishes it.
 func (s *Service) PublishBlueprint(ctx context.Context, projectID, id string) (*Blueprint, error) {
 	bp, err := s.repo.GetByID(ctx, projectID, id)
 	if err != nil {
-		return nil, err
-	}
-	if err := guardMutable(bp); err != nil {
 		return nil, err
 	}
 	if bp.Status != StatusDraft {
@@ -182,14 +180,12 @@ func (s *Service) PublishBlueprint(ctx context.Context, projectID, id string) (*
 	return bp, nil
 }
 
-// DeprecateBlueprint transitions the caller's own private blueprint to
-// deprecated (from any status). Global blueprints are immutable.
+// DeprecateBlueprint transitions any blueprint to deprecated (from any
+// status). Allowed on global blueprints — deprecation is a lifecycle
+// transition, not a content mutation.
 func (s *Service) DeprecateBlueprint(ctx context.Context, projectID, id string) (*Blueprint, error) {
 	bp, err := s.repo.GetByID(ctx, projectID, id)
 	if err != nil {
-		return nil, err
-	}
-	if err := guardMutable(bp); err != nil {
 		return nil, err
 	}
 	if bp.Status == StatusDeprecated {
