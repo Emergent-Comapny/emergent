@@ -21,6 +21,7 @@ type AgentDTO struct {
 	Capabilities        *AgentCapabilities `json:"capabilities"`
 	Config              map[string]any     `json:"config"`
 	Description         *string            `json:"description"`
+	AgentDefinitionID   *string            `json:"agentDefinitionId,omitempty"`
 	LastRunAt           *time.Time         `json:"lastRunAt"`
 	LastRunStatus       *string            `json:"lastRunStatus"`
 	ConsecutiveFailures int                `json:"consecutiveFailures"`
@@ -224,6 +225,7 @@ func (a *Agent) ToDTO() *AgentDTO {
 		Capabilities:        a.Capabilities,
 		Config:              a.Config,
 		Description:         a.Description,
+		AgentDefinitionID:   a.AgentDefinitionID,
 		LastRunAt:           a.LastRunAt,
 		LastRunStatus:       a.LastRunStatus,
 		ConsecutiveFailures: a.ConsecutiveFailures,
