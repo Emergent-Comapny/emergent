@@ -18,6 +18,8 @@ const (
 // Manifest is stored as opaque JSON; its contents are parsed and validated
 // in a later apply phase. Checksum is a content hash of the JSON manifest
 // used for future apply/drift comparison, not verified on read.
+// ProjectID is nil for global (shared built-in) blueprints; set to a project
+// UUID for private blueprints visible only to that project.
 type Blueprint struct {
 	bun.BaseModel `bun:"table:kb.blueprints,alias:bp"`
 
@@ -27,18 +29,30 @@ type Blueprint struct {
 	Description string          `bun:"description,notnull,default:''" json:"description"`
 	Author      string          `bun:"author,notnull,default:''" json:"author"`
 	Status      string          `bun:"status,notnull,default:'draft'" json:"status"`
+	ProjectID   *string         `bun:"project_id,type:uuid" json:"projectId,omitempty"`
 	Manifest    json.RawMessage `bun:"manifest,type:jsonb" json:"manifest"`
 	Checksum    string          `bun:"checksum,notnull,default:''" json:"checksum"`
 	CreatedAt   time.Time       `bun:"created_at,notnull" json:"created_at"`
 	UpdatedAt   time.Time       `bun:"updated_at,notnull" json:"updated_at"`
 }
 
+// Scope reports the blueprint's visibility scope: "project" for private
+// blueprints, "global" for shared built-ins.
+func (b *Blueprint) Scope() string {
+	if b.ProjectID != nil {
+		return "project"
+	}
+	return "global"
+}
+
 // CreateBlueprintRequest is the request to create a new blueprint draft.
+// ProjectID nil = global; set = private to that project.
 type CreateBlueprintRequest struct {
 	Name        string          `json:"name"`
 	Version     string          `json:"version"`
 	Description string          `json:"description,omitempty"`
 	Author      string          `json:"author,omitempty"`
+	ProjectID   *string         `json:"projectId,omitempty"`
 	Manifest    json.RawMessage `json:"manifest"`
 }
 

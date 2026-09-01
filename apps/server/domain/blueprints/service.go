@@ -46,7 +46,18 @@ func (s *Service) SetAgentRepo(ar *agents.Repository) {
 	s.agentRepo = ar
 }
 
-// CreateBlueprint validates the request and creates a new blueprint draft.
+// guardMutable rejects mutations of global blueprints. Global (project_id IS
+// NULL) blueprints are shared built-ins and immutable; a caller must fork a
+// version (NewVersion, which clones into their private scope) to change one.
+func guardMutable(bp *Blueprint) error {
+	if bp.ProjectID == nil {
+		return apperror.ErrConflict.WithMessage("global blueprints are immutable; fork a version instead")
+	}
+	return nil
+}
+
+// CreateBlueprint validates the request and creates a new blueprint draft in
+// the scope given by req.ProjectID (nil = global, set = private).
 func (s *Service) CreateBlueprint(ctx context.Context, req *CreateBlueprintRequest) (*Blueprint, error) {
 	if req.Name == "" {
 		return nil, apperror.ErrBadRequest.WithMessage("name is required")
@@ -55,7 +66,12 @@ func (s *Service) CreateBlueprint(ctx context.Context, req *CreateBlueprintReque
 		return nil, apperror.ErrBadRequest.WithMessage("version is required")
 	}
 
-	exists, err := s.repo.ExistsByNameVersion(ctx, req.Name, req.Version)
+	// Pre-check existence in the same scope the new row will occupy.
+	scope := req.ProjectID
+	if scope != nil && *scope == "" {
+		scope = nil
+	}
+	exists, err := s.repo.ExistsByNameVersion(ctx, scope, req.Name, req.Version)
 	if err != nil {
 		return nil, err
 	}
@@ -70,6 +86,7 @@ func (s *Service) CreateBlueprint(ctx context.Context, req *CreateBlueprintReque
 		Description: req.Description,
 		Author:      req.Author,
 		Status:      StatusDraft,
+		ProjectID:   req.ProjectID,
 		Manifest:    req.Manifest,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -84,25 +101,33 @@ func (s *Service) CreateBlueprint(ctx context.Context, req *CreateBlueprintReque
 	return bp, nil
 }
 
-// GetBlueprint returns a blueprint by ID.
-func (s *Service) GetBlueprint(ctx context.Context, id string) (*Blueprint, error) {
-	return s.repo.GetByID(ctx, id)
+// GetBlueprint returns a blueprint by ID within the caller's read scope
+// (global + own private).
+func (s *Service) GetBlueprint(ctx context.Context, projectID, id string) (*Blueprint, error) {
+	return s.repo.GetByID(ctx, projectID, id)
 }
 
-// ListBlueprints returns blueprints, optionally filtered by name.
-func (s *Service) ListBlueprints(ctx context.Context, nameFilter string) ([]Blueprint, error) {
-	return s.repo.List(ctx, nameFilter)
+// ListBlueprints returns blueprints within the caller's read scope (global +
+// own private), optionally filtered by name.
+func (s *Service) ListBlueprints(ctx context.Context, projectID, nameFilter string) ([]Blueprint, error) {
+	return s.repo.List(ctx, projectID, nameFilter)
 }
 
-// ListVersions returns all versions of a blueprint name.
-func (s *Service) ListVersions(ctx context.Context, name string) ([]Blueprint, error) {
-	return s.repo.ListVersionsByName(ctx, name)
+// ListVersions returns all versions of a blueprint name within the caller's
+// read scope (global + own private).
+func (s *Service) ListVersions(ctx context.Context, projectID, name string) ([]Blueprint, error) {
+	return s.repo.ListVersionsByName(ctx, projectID, name)
 }
 
-// UpdateBlueprint updates a draft blueprint's description, author, and manifest.
-func (s *Service) UpdateBlueprint(ctx context.Context, id string, req *UpdateBlueprintRequest) (*Blueprint, error) {
-	bp, err := s.repo.GetByID(ctx, id)
+// UpdateBlueprint updates a draft blueprint's description, author, and
+// manifest. Only the caller's own private drafts can be updated — global
+// blueprints are immutable (fork a version instead).
+func (s *Service) UpdateBlueprint(ctx context.Context, projectID, id string, req *UpdateBlueprintRequest) (*Blueprint, error) {
+	bp, err := s.repo.GetByID(ctx, projectID, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := guardMutable(bp); err != nil {
 		return nil, err
 	}
 	if bp.Status != StatusDraft {
@@ -128,10 +153,14 @@ func (s *Service) UpdateBlueprint(ctx context.Context, id string, req *UpdateBlu
 // PublishBlueprint transitions a draft to published, computing a sha256
 // checksum over the raw JSON manifest bytes. The checksum is a content hash
 // of the manifest for future apply/drift comparison; it is not verified on
-// read (tamper detection is out of scope for this phase).
-func (s *Service) PublishBlueprint(ctx context.Context, id string) (*Blueprint, error) {
-	bp, err := s.repo.GetByID(ctx, id)
+// read (tamper detection is out of scope for this phase). Only the caller's
+// own private drafts can be published — global blueprints are immutable.
+func (s *Service) PublishBlueprint(ctx context.Context, projectID, id string) (*Blueprint, error) {
+	bp, err := s.repo.GetByID(ctx, projectID, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := guardMutable(bp); err != nil {
 		return nil, err
 	}
 	if bp.Status != StatusDraft {
@@ -153,10 +182,14 @@ func (s *Service) PublishBlueprint(ctx context.Context, id string) (*Blueprint, 
 	return bp, nil
 }
 
-// DeprecateBlueprint transitions any blueprint to deprecated.
-func (s *Service) DeprecateBlueprint(ctx context.Context, id string) (*Blueprint, error) {
-	bp, err := s.repo.GetByID(ctx, id)
+// DeprecateBlueprint transitions the caller's own private blueprint to
+// deprecated (from any status). Global blueprints are immutable.
+func (s *Service) DeprecateBlueprint(ctx context.Context, projectID, id string) (*Blueprint, error) {
+	bp, err := s.repo.GetByID(ctx, projectID, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := guardMutable(bp); err != nil {
 		return nil, err
 	}
 	if bp.Status == StatusDeprecated {
@@ -170,18 +203,25 @@ func (s *Service) DeprecateBlueprint(ctx context.Context, id string) (*Blueprint
 	return bp, nil
 }
 
-// NewVersion clones a blueprint into a new row with the given version, status draft.
-func (s *Service) NewVersion(ctx context.Context, id, newVersion string) (*Blueprint, error) {
+// NewVersion clones a blueprint into a new row with the given version, status
+// draft. The source is read via the caller's read scope (global or own), but
+// the clone is always private to the caller: ProjectID is set to the caller's
+// project when non-empty, else nil (global).
+func (s *Service) NewVersion(ctx context.Context, projectID, id, newVersion string) (*Blueprint, error) {
 	if newVersion == "" {
 		return nil, apperror.ErrBadRequest.WithMessage("version is required")
 	}
 
-	source, err := s.repo.GetByID(ctx, id)
+	source, err := s.repo.GetByID(ctx, projectID, id)
 	if err != nil {
 		return nil, err
 	}
 
-	exists, err := s.repo.ExistsByNameVersion(ctx, source.Name, newVersion)
+	var cloneScope *string
+	if projectID != "" {
+		cloneScope = &projectID
+	}
+	exists, err := s.repo.ExistsByNameVersion(ctx, cloneScope, source.Name, newVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -196,6 +236,7 @@ func (s *Service) NewVersion(ctx context.Context, id, newVersion string) (*Bluep
 		Description: source.Description,
 		Author:      source.Author,
 		Status:      StatusDraft,
+		ProjectID:   cloneScope,
 		Manifest:    source.Manifest,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -210,10 +251,14 @@ func (s *Service) NewVersion(ctx context.Context, id, newVersion string) (*Bluep
 	return clone, nil
 }
 
-// DeleteBlueprint deletes a blueprint, draft only.
-func (s *Service) DeleteBlueprint(ctx context.Context, id string) error {
-	bp, err := s.repo.GetByID(ctx, id)
+// DeleteBlueprint deletes the caller's own private draft blueprint. Global
+// blueprints are immutable.
+func (s *Service) DeleteBlueprint(ctx context.Context, projectID, id string) error {
+	bp, err := s.repo.GetByID(ctx, projectID, id)
 	if err != nil {
+		return err
+	}
+	if err := guardMutable(bp); err != nil {
 		return err
 	}
 	if bp.Status != StatusDraft {
@@ -261,7 +306,7 @@ func (s *Service) recordApplication(ctx context.Context, bp *Blueprint, projectI
 // retry after a mid-unapply crash converges. The record is marked unapplied
 // last so GET /applied still lists it until the unapply completes.
 func (s *Service) Unapply(ctx context.Context, blueprintID, projectID string) (*UnapplyResult, error) {
-	bp, err := s.repo.GetByID(ctx, blueprintID)
+	bp, err := s.repo.GetByID(ctx, projectID, blueprintID)
 	if err != nil {
 		return nil, err
 	}

@@ -16,6 +16,8 @@ type BlueprintToolHandler interface {
 	ExecuteBlueprintUnapply(ctx context.Context, projectID string, args map[string]any) (*ToolResult, error)
 	ExecuteBlueprintVersions(ctx context.Context, projectID string, args map[string]any) (*ToolResult, error)
 	ExecuteBlueprintListApplied(ctx context.Context, projectID string, args map[string]any) (*ToolResult, error)
+	ExecuteBlueprintNewVersion(ctx context.Context, projectID string, args map[string]any) (*ToolResult, error)
+	ExecuteBlueprintUpdate(ctx context.Context, projectID string, args map[string]any) (*ToolResult, error)
 }
 
 // ============================================================================
@@ -27,7 +29,7 @@ func blueprintsToolDefinitions() []ToolDefinition {
 		{
 			Name:          "blueprint-create",
 			RequiredScope: "schema:write",
-			Description:   "Create a new blueprint draft. Returns the created blueprint with its id, name, version, and manifest. Publish it with blueprint-publish before applying it to a project.",
+			Description:   "Create a new blueprint draft, scoped to the caller's project (private). Returns the created blueprint with its id, name, version, and manifest. Publish it with blueprint-publish before applying it to a project. Global built-ins are readable and apply-able but immutable — fork one with blueprint-new-version to change it.",
 			InputSchema: InputSchema{
 				Type: "object",
 				Properties: map[string]PropertySchema{
@@ -58,7 +60,7 @@ func blueprintsToolDefinitions() []ToolDefinition {
 		{
 			Name:          "blueprint-list",
 			RequiredScope: "schema:read",
-			Description:   "List blueprints, optionally filtered by name. Returns id, name, version, status, and checksum for each blueprint.",
+			Description:   "List blueprints visible to the caller: global built-ins plus the caller's own private blueprints. Optionally filtered by name. Returns id, name, version, status, scope, and checksum for each blueprint.",
 			InputSchema: InputSchema{
 				Type: "object",
 				Properties: map[string]PropertySchema{
@@ -73,7 +75,7 @@ func blueprintsToolDefinitions() []ToolDefinition {
 		{
 			Name:          "blueprint-get",
 			RequiredScope: "schema:read",
-			Description:   "Get a single blueprint by id. Returns the full blueprint including its manifest.",
+			Description:   "Get a single blueprint by id within the caller's read scope (global built-ins plus the caller's own private blueprints). Returns the full blueprint including its manifest.",
 			InputSchema: InputSchema{
 				Type: "object",
 				Properties: map[string]PropertySchema{
@@ -88,7 +90,7 @@ func blueprintsToolDefinitions() []ToolDefinition {
 		{
 			Name:          "blueprint-publish",
 			RequiredScope: "schema:write",
-			Description:   "Publish a draft blueprint, computing a sha256 checksum over its manifest. Only published (or draft) blueprints can be applied. Returns the published blueprint.",
+			Description:   "Publish the caller's own private draft blueprint, computing a sha256 checksum over its manifest. Global built-ins are immutable — fork a version to change one. Returns the published blueprint.",
 			InputSchema: InputSchema{
 				Type: "object",
 				Properties: map[string]PropertySchema{
@@ -133,7 +135,7 @@ func blueprintsToolDefinitions() []ToolDefinition {
 		{
 			Name:          "blueprint-versions",
 			RequiredScope: "schema:read",
-			Description:   "List all versions of a blueprint name, newest first. Returns the full blueprint for each version.",
+			Description:   "List all versions of a blueprint name visible to the caller (global built-ins plus the caller's own private blueprints), newest first. Returns the full blueprint for each version.",
 			InputSchema: InputSchema{
 				Type: "object",
 				Properties: map[string]PropertySchema{
@@ -153,6 +155,52 @@ func blueprintsToolDefinitions() []ToolDefinition {
 				Type:       "object",
 				Properties: map[string]PropertySchema{},
 				Required:   []string{},
+			},
+		},
+		{
+			Name:          "blueprint-new-version",
+			RequiredScope: "schema:write",
+			Description:   "Clone an existing blueprint into a new version as a draft. The source may be a global built-in or your own blueprint; the clone is created as a private draft in your project. Publish it (blueprint-publish) before applying.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]PropertySchema{
+					"id": {
+						Type:        "string",
+						Description: "UUID of the blueprint to clone from",
+					},
+					"version": {
+						Type:        "string",
+						Description: "New semantic version, e.g. '1.1.0'",
+					},
+				},
+				Required: []string{"id", "version"},
+			},
+		},
+		{
+			Name:          "blueprint-update",
+			RequiredScope: "schema:write",
+			Description:   "Update a draft blueprint's description, author, and/or manifest. Only your own private drafts can be updated — global blueprints are immutable; fork one with blueprint-new-version to change it.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]PropertySchema{
+					"id": {
+						Type:        "string",
+						Description: "UUID of the draft blueprint to update",
+					},
+					"description": {
+						Type:        "string",
+						Description: "New description (optional)",
+					},
+					"author": {
+						Type:        "string",
+						Description: "New author (optional)",
+					},
+					"manifest": {
+						Type:        "object",
+						Description: "New manifest as a JSON object or a JSON-encoded string (optional). Describes schema packs, agents, skills, and seed graph objects/relationships to materialize on apply.",
+					},
+				},
+				Required: []string{"id"},
 			},
 		},
 	}

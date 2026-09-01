@@ -26,7 +26,8 @@ func newServiceFromBun(t *testing.T, db *bun.DB) *Service {
 }
 
 // TestService_CreateBlueprint_Success verifies a created blueprint is a draft
-// with the manifest round-tripping through the jsonb column.
+// with the manifest round-tripping through the jsonb column. A request without
+// a project is global.
 func TestService_CreateBlueprint_Success(t *testing.T) {
 	db := connectTestDB(t)
 	svc := newServiceFromBun(t, db)
@@ -43,8 +44,9 @@ func TestService_CreateBlueprint_Success(t *testing.T) {
 	assert.NotEmpty(t, bp.ID)
 	assert.Equal(t, StatusDraft, bp.Status)
 	assert.Equal(t, "", bp.Checksum)
+	assert.Equal(t, "global", bp.Scope(), "no project in request => global blueprint")
 
-	got, err := svc.repo.GetByID(ctx, bp.ID)
+	got, err := svc.repo.GetByID(ctx, "", bp.ID)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"kind":"service"}`, string(got.Manifest), "manifest must round-trip")
 	assert.Equal(t, "a test blueprint", got.Description)
@@ -80,21 +82,23 @@ func TestService_CreateBlueprint_Validation(t *testing.T) {
 }
 
 // TestService_UpdateBlueprint verifies draft updates apply and non-draft
-// updates are rejected.
+// updates are rejected. Only private (project-scoped) drafts can be updated.
 func TestService_UpdateBlueprint(t *testing.T) {
 	db := connectTestDB(t)
 	svc := newServiceFromBun(t, db)
 	ctx := context.Background()
 
+	proj := uuid.NewString()
 	bp, err := svc.CreateBlueprint(ctx, &CreateBlueprintRequest{
 		Name: uniqueName("svc-update"), Version: "1.0.0", Manifest: json.RawMessage(`{"v":1}`),
+		ProjectID: &proj,
 	})
 	require.NoError(t, err)
 
 	t.Run("draft update applies", func(t *testing.T) {
 		desc := "updated"
 		author := "author2"
-		updated, err := svc.UpdateBlueprint(ctx, bp.ID, &UpdateBlueprintRequest{
+		updated, err := svc.UpdateBlueprint(ctx, proj, bp.ID, &UpdateBlueprintRequest{
 			Description: &desc,
 			Author:      &author,
 			Manifest:    json.RawMessage(`{"v":2}`),
@@ -107,12 +111,19 @@ func TestService_UpdateBlueprint(t *testing.T) {
 	})
 
 	t.Run("published blueprint cannot be updated", func(t *testing.T) {
-		_, err := svc.PublishBlueprint(ctx, bp.ID)
+		_, err := svc.PublishBlueprint(ctx, proj, bp.ID)
 		require.NoError(t, err)
 
 		desc := "nope"
-		_, err = svc.UpdateBlueprint(ctx, bp.ID, &UpdateBlueprintRequest{Description: &desc})
+		_, err = svc.UpdateBlueprint(ctx, proj, bp.ID, &UpdateBlueprintRequest{Description: &desc})
 		assertAppErrorCode(t, err, apperror.ErrConflict.Code)
+	})
+
+	t.Run("another project cannot update a private blueprint", func(t *testing.T) {
+		other := uuid.NewString()
+		desc := "sneaky"
+		_, err := svc.UpdateBlueprint(ctx, other, bp.ID, &UpdateBlueprintRequest{Description: &desc})
+		assertAppErrorCode(t, err, apperror.ErrNotFound.Code)
 	})
 }
 
@@ -123,18 +134,20 @@ func TestService_PublishBlueprint_ComputesSha256Checksum(t *testing.T) {
 	svc := newServiceFromBun(t, db)
 	ctx := context.Background()
 
+	proj := uuid.NewString()
 	bp, err := svc.CreateBlueprint(ctx, &CreateBlueprintRequest{
 		Name: uniqueName("svc-publish"), Version: "1.0.0",
-		Manifest: json.RawMessage(`{"kind":"publish-me"}`),
+		Manifest:  json.RawMessage(`{"kind":"publish-me"}`),
+		ProjectID: &proj,
 	})
 	require.NoError(t, err)
 
 	// Checksum must be sha256 of the ROUND-TRIPPED manifest (jsonb normalizes
 	// whitespace, so compute against what the DB actually returns).
-	stored, err := svc.repo.GetByID(ctx, bp.ID)
+	stored, err := svc.repo.GetByID(ctx, proj, bp.ID)
 	require.NoError(t, err)
 
-	pub, err := svc.PublishBlueprint(ctx, bp.ID)
+	pub, err := svc.PublishBlueprint(ctx, proj, bp.ID)
 	require.NoError(t, err)
 	assert.Equal(t, StatusPublished, pub.Status)
 	require.NotEmpty(t, pub.Checksum)
@@ -150,14 +163,16 @@ func TestService_PublishBlueprint_AlreadyPublished_Conflict(t *testing.T) {
 	svc := newServiceFromBun(t, db)
 	ctx := context.Background()
 
+	proj := uuid.NewString()
 	bp, err := svc.CreateBlueprint(ctx, &CreateBlueprintRequest{
 		Name: uniqueName("svc-republish"), Version: "1.0.0", Manifest: json.RawMessage(`{}`),
+		ProjectID: &proj,
 	})
 	require.NoError(t, err)
-	_, err = svc.PublishBlueprint(ctx, bp.ID)
+	_, err = svc.PublishBlueprint(ctx, proj, bp.ID)
 	require.NoError(t, err)
 
-	_, err = svc.PublishBlueprint(ctx, bp.ID)
+	_, err = svc.PublishBlueprint(ctx, proj, bp.ID)
 	assertAppErrorCode(t, err, apperror.ErrConflict.Code)
 }
 
@@ -168,16 +183,18 @@ func TestService_NewVersion(t *testing.T) {
 	svc := newServiceFromBun(t, db)
 	ctx := context.Background()
 
+	proj := uuid.NewString()
 	bp, err := svc.CreateBlueprint(ctx, &CreateBlueprintRequest{
 		Name:        uniqueName("svc-version"),
 		Version:     "1.0.0",
 		Description: "orig desc",
 		Author:      "orig author",
 		Manifest:    json.RawMessage(`{"kind":"clone-me"}`),
+		ProjectID:   &proj,
 	})
 	require.NoError(t, err)
 
-	clone, err := svc.NewVersion(ctx, bp.ID, "2.0.0")
+	clone, err := svc.NewVersion(ctx, proj, bp.ID, "2.0.0")
 	require.NoError(t, err)
 	assert.NotEqual(t, bp.ID, clone.ID, "clone must be a NEW row")
 	assert.Equal(t, bp.Name, clone.Name)
@@ -186,13 +203,15 @@ func TestService_NewVersion(t *testing.T) {
 	assert.Equal(t, "orig desc", clone.Description)
 	assert.Equal(t, "orig author", clone.Author)
 	assert.JSONEq(t, `{"kind":"clone-me"}`, string(clone.Manifest), "manifest must be copied")
+	require.NotNil(t, clone.ProjectID, "clone of a private blueprint must stay private")
+	assert.Equal(t, proj, *clone.ProjectID)
 
-	versions, err := svc.ListVersions(ctx, bp.Name)
+	versions, err := svc.ListVersions(ctx, proj, bp.Name)
 	require.NoError(t, err)
 	require.Len(t, versions, 2)
 
 	t.Run("existing version conflicts", func(t *testing.T) {
-		_, err := svc.NewVersion(ctx, bp.ID, "1.0.0")
+		_, err := svc.NewVersion(ctx, proj, bp.ID, "1.0.0")
 		assertAppErrorCode(t, err, apperror.ErrConflict.Code)
 	})
 }
@@ -204,18 +223,20 @@ func TestService_DeprecateBlueprint_IsIdempotent(t *testing.T) {
 	svc := newServiceFromBun(t, db)
 	ctx := context.Background()
 
+	proj := uuid.NewString()
 	bp, err := svc.CreateBlueprint(ctx, &CreateBlueprintRequest{
 		Name: uniqueName("svc-deprecate"), Version: "1.0.0", Manifest: json.RawMessage(`{}`),
+		ProjectID: &proj,
 	})
 	require.NoError(t, err)
 
 	// draft → deprecated directly.
-	dep, err := svc.DeprecateBlueprint(ctx, bp.ID)
+	dep, err := svc.DeprecateBlueprint(ctx, proj, bp.ID)
 	require.NoError(t, err)
 	assert.Equal(t, StatusDeprecated, dep.Status)
 
 	// deprecated → deprecated is idempotent (no error, same row).
-	again, err := svc.DeprecateBlueprint(ctx, bp.ID)
+	again, err := svc.DeprecateBlueprint(ctx, proj, bp.ID)
 	require.NoError(t, err)
 	assert.Equal(t, StatusDeprecated, again.Status)
 	assert.Equal(t, dep.ID, again.ID)
@@ -228,23 +249,34 @@ func TestService_DeleteBlueprint_DraftOnly(t *testing.T) {
 	svc := newServiceFromBun(t, db)
 	ctx := context.Background()
 
-	req := &CreateBlueprintRequest{Name: uniqueName("svc-delete"), Version: "1.0.0", Manifest: json.RawMessage(`{}`)}
+	proj := uuid.NewString()
+	req := &CreateBlueprintRequest{Name: uniqueName("svc-delete"), Version: "1.0.0", Manifest: json.RawMessage(`{}`), ProjectID: &proj}
 
 	t.Run("draft deletes", func(t *testing.T) {
 		bp, err := svc.CreateBlueprint(ctx, req)
 		require.NoError(t, err)
-		require.NoError(t, svc.DeleteBlueprint(ctx, bp.ID))
-		_, err = svc.repo.GetByID(ctx, bp.ID)
+		require.NoError(t, svc.DeleteBlueprint(ctx, proj, bp.ID))
+		_, err = svc.repo.GetByID(ctx, proj, bp.ID)
 		assertAppErrorCode(t, err, apperror.ErrNotFound.Code)
 	})
 
 	t.Run("published cannot be deleted", func(t *testing.T) {
 		bp, err := svc.CreateBlueprint(ctx, req)
 		require.NoError(t, err)
-		_, err = svc.PublishBlueprint(ctx, bp.ID)
+		_, err = svc.PublishBlueprint(ctx, proj, bp.ID)
 		require.NoError(t, err)
-		err = svc.DeleteBlueprint(ctx, bp.ID)
+		err = svc.DeleteBlueprint(ctx, proj, bp.ID)
 		assertAppErrorCode(t, err, apperror.ErrConflict.Code)
+	})
+
+	t.Run("another project cannot delete a private blueprint", func(t *testing.T) {
+		bp, err := svc.CreateBlueprint(ctx, &CreateBlueprintRequest{
+			Name: uniqueName("svc-delete-other"), Version: "1.0.0", Manifest: json.RawMessage(`{}`),
+			ProjectID: &proj,
+		})
+		require.NoError(t, err)
+		err = svc.DeleteBlueprint(ctx, uuid.NewString(), bp.ID)
+		assertAppErrorCode(t, err, apperror.ErrNotFound.Code)
 	})
 }
 
@@ -255,14 +287,16 @@ func TestService_Apply_Deprecated_Conflict(t *testing.T) {
 	svc := newServiceFromBun(t, db)
 	ctx := context.Background()
 
+	proj := uuid.NewString()
 	bp, err := svc.CreateBlueprint(ctx, &CreateBlueprintRequest{
 		Name: uniqueName("svc-apply-dep"), Version: "1.0.0", Manifest: json.RawMessage(`{}`),
+		ProjectID: &proj,
 	})
 	require.NoError(t, err)
-	_, err = svc.DeprecateBlueprint(ctx, bp.ID)
+	_, err = svc.DeprecateBlueprint(ctx, proj, bp.ID)
 	require.NoError(t, err)
 
-	_, err = svc.Apply(ctx, bp.ID, uuid.NewString(), uuid.NewString(), ApplyOptions{})
+	_, err = svc.Apply(ctx, bp.ID, proj, uuid.NewString(), ApplyOptions{})
 	assertAppErrorCode(t, err, apperror.ErrConflict.Code)
 }
 
@@ -276,11 +310,150 @@ func TestService_Apply_InvalidManifest_BadRequest(t *testing.T) {
 
 	// `[]` is valid JSON (storable in the jsonb column) but cannot unmarshal
 	// into BlueprintManifest.
+	proj := uuid.NewString()
 	bp, err := svc.CreateBlueprint(ctx, &CreateBlueprintRequest{
 		Name: uniqueName("svc-apply-invalid"), Version: "1.0.0", Manifest: json.RawMessage(`[]`),
+		ProjectID: &proj,
 	})
 	require.NoError(t, err)
 
-	_, err = svc.Apply(ctx, bp.ID, uuid.NewString(), uuid.NewString(), ApplyOptions{})
+	_, err = svc.Apply(ctx, bp.ID, proj, uuid.NewString(), ApplyOptions{})
 	assertAppErrorCode(t, err, apperror.ErrBadRequest.Code)
+}
+
+// TestService_GlobalBlueprint_VisibleFromAnyProject verifies a global blueprint
+// is listable and gettable from any project.
+func TestService_GlobalBlueprint_VisibleFromAnyProject(t *testing.T) {
+	db := connectTestDB(t)
+	svc := newServiceFromBun(t, db)
+	ctx := context.Background()
+
+	proj := uuid.NewString()
+	bp, err := svc.CreateBlueprint(ctx, &CreateBlueprintRequest{
+		Name: uniqueName("svc-global-vis"), Version: "1.0.0", Manifest: json.RawMessage(`{}`),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "global", bp.Scope())
+
+	// Visible from a project context...
+	got, err := svc.GetBlueprint(ctx, proj, bp.ID)
+	require.NoError(t, err)
+	assert.Equal(t, bp.ID, got.ID)
+
+	// ...and from no project context.
+	got, err = svc.GetBlueprint(ctx, "", bp.ID)
+	require.NoError(t, err)
+	assert.Equal(t, bp.ID, got.ID)
+
+	// Listable (filtered and unfiltered) from any project.
+	list, err := svc.ListBlueprints(ctx, proj, bp.Name)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.Equal(t, bp.ID, list[0].ID)
+
+	versions, err := svc.ListVersions(ctx, proj, bp.Name)
+	require.NoError(t, err)
+	require.Len(t, versions, 1)
+}
+
+// TestService_PrivateBlueprint_HiddenFromOtherProjects verifies a private
+// blueprint is only visible to its owning project.
+func TestService_PrivateBlueprint_HiddenFromOtherProjects(t *testing.T) {
+	db := connectTestDB(t)
+	svc := newServiceFromBun(t, db)
+	ctx := context.Background()
+
+	owner := uuid.NewString()
+	other := uuid.NewString()
+	bp, err := svc.CreateBlueprint(ctx, &CreateBlueprintRequest{
+		Name: uniqueName("svc-private-vis"), Version: "1.0.0", Manifest: json.RawMessage(`{}`),
+		ProjectID: &owner,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "project", bp.Scope())
+
+	// Owner sees it.
+	got, err := svc.GetBlueprint(ctx, owner, bp.ID)
+	require.NoError(t, err)
+	assert.Equal(t, bp.ID, got.ID)
+
+	// Another project: not found.
+	_, err = svc.GetBlueprint(ctx, other, bp.ID)
+	assertAppErrorCode(t, err, apperror.ErrNotFound.Code)
+
+	// No project context: not found (global-only scope).
+	_, err = svc.GetBlueprint(ctx, "", bp.ID)
+	assertAppErrorCode(t, err, apperror.ErrNotFound.Code)
+
+	// Not listed for another project, even with the exact name filter.
+	list, err := svc.ListBlueprints(ctx, other, bp.Name)
+	require.NoError(t, err)
+	require.Empty(t, list)
+}
+
+// TestService_GlobalBlueprint_Immutability verifies Update/Publish/Deprecate/
+// Delete on a global blueprint are rejected with the immutability conflict.
+func TestService_GlobalBlueprint_Immutability(t *testing.T) {
+	db := connectTestDB(t)
+	svc := newServiceFromBun(t, db)
+	ctx := context.Background()
+
+	proj := uuid.NewString()
+	bp, err := svc.CreateBlueprint(ctx, &CreateBlueprintRequest{
+		Name: uniqueName("svc-global-immutable"), Version: "1.0.0", Manifest: json.RawMessage(`{}`),
+	})
+	require.NoError(t, err)
+
+	desc := "nope"
+	_, err = svc.UpdateBlueprint(ctx, proj, bp.ID, &UpdateBlueprintRequest{Description: &desc})
+	assertAppErrorCode(t, err, apperror.ErrConflict.Code)
+
+	_, err = svc.PublishBlueprint(ctx, proj, bp.ID)
+	assertAppErrorCode(t, err, apperror.ErrConflict.Code)
+
+	_, err = svc.DeprecateBlueprint(ctx, proj, bp.ID)
+	assertAppErrorCode(t, err, apperror.ErrConflict.Code)
+
+	err = svc.DeleteBlueprint(ctx, proj, bp.ID)
+	assertAppErrorCode(t, err, apperror.ErrConflict.Code)
+
+	// The blueprint is still readable (immutable, not hidden).
+	_, err = svc.GetBlueprint(ctx, proj, bp.ID)
+	require.NoError(t, err)
+}
+
+// TestService_NewVersion_OfGlobal_ProducesPrivateClone verifies forking a
+// global blueprint yields a clone scoped to the caller's project.
+func TestService_NewVersion_OfGlobal_ProducesPrivateClone(t *testing.T) {
+	db := connectTestDB(t)
+	svc := newServiceFromBun(t, db)
+	ctx := context.Background()
+
+	proj := uuid.NewString()
+	bp, err := svc.CreateBlueprint(ctx, &CreateBlueprintRequest{
+		Name: uniqueName("svc-global-fork"), Version: "1.0.0", Manifest: json.RawMessage(`{"kind":"fork"}`),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "global", bp.Scope())
+
+	clone, err := svc.NewVersion(ctx, proj, bp.ID, "1.1.0")
+	require.NoError(t, err)
+	require.NotNil(t, clone.ProjectID, "fork of a global blueprint must become private")
+	assert.Equal(t, proj, *clone.ProjectID)
+	assert.Equal(t, bp.Name, clone.Name)
+	assert.JSONEq(t, `{"kind":"fork"}`, string(clone.Manifest), "manifest must be copied")
+
+	// The clone is invisible to other projects.
+	_, err = svc.GetBlueprint(ctx, uuid.NewString(), clone.ID)
+	assertAppErrorCode(t, err, apperror.ErrNotFound.Code)
+
+	// The global source and the private clone can coexist on the same name.
+	versions, err := svc.ListVersions(ctx, proj, bp.Name)
+	require.NoError(t, err)
+	require.Len(t, versions, 2)
+
+	// Forking with no project context yields a global clone.
+	globalClone, err := svc.NewVersion(ctx, "", bp.ID, "2.0.0")
+	require.NoError(t, err)
+	assert.Nil(t, globalClone.ProjectID, "fork without project context stays global")
 }

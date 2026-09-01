@@ -67,7 +67,8 @@ func toRawManifest(v any) (json.RawMessage, error) {
 // Blueprint Tools
 // ============================================================================
 
-// ExecuteBlueprintCreate creates a new blueprint draft.
+// ExecuteBlueprintCreate creates a new blueprint draft, scoped to the caller's
+// project (private) when the caller has a project context; global otherwise.
 func (h *MCPBlueprintToolHandler) ExecuteBlueprintCreate(ctx context.Context, projectID string, args map[string]any) (*mcp.ToolResult, error) {
 	name, _ := args["name"].(string)
 	version, _ := args["version"].(string)
@@ -79,52 +80,59 @@ func (h *MCPBlueprintToolHandler) ExecuteBlueprintCreate(ctx context.Context, pr
 		return errResult("invalid manifest: " + err.Error())
 	}
 
-	bp, err := h.svc.CreateBlueprint(ctx, &CreateBlueprintRequest{
+	req := &CreateBlueprintRequest{
 		Name:        name,
 		Version:     version,
 		Description: description,
 		Author:      author,
 		Manifest:    manifest,
-	})
+	}
+	if projectID != "" {
+		req.ProjectID = &projectID
+	}
+	bp, err := h.svc.CreateBlueprint(ctx, req)
 	if err != nil {
 		return errResult("failed to create blueprint: " + err.Error())
 	}
 	return h.wrapResult(bp)
 }
 
-// ExecuteBlueprintList lists blueprints, optionally filtered by name.
+// ExecuteBlueprintList lists blueprints in the caller's read scope (global +
+// own private), optionally filtered by name.
 func (h *MCPBlueprintToolHandler) ExecuteBlueprintList(ctx context.Context, projectID string, args map[string]any) (*mcp.ToolResult, error) {
 	name, _ := args["name"].(string)
 
-	bps, err := h.svc.ListBlueprints(ctx, name)
+	bps, err := h.svc.ListBlueprints(ctx, projectID, name)
 	if err != nil {
 		return errResult("failed to list blueprints: " + err.Error())
 	}
 	return h.wrapResult(bps)
 }
 
-// ExecuteBlueprintGet gets a single blueprint by id.
+// ExecuteBlueprintGet gets a single blueprint by id within the caller's read
+// scope (global + own private).
 func (h *MCPBlueprintToolHandler) ExecuteBlueprintGet(ctx context.Context, projectID string, args map[string]any) (*mcp.ToolResult, error) {
 	id, _ := args["id"].(string)
 	if id == "" {
 		return errResult("id is required")
 	}
 
-	bp, err := h.svc.GetBlueprint(ctx, id)
+	bp, err := h.svc.GetBlueprint(ctx, projectID, id)
 	if err != nil {
 		return errResult("failed to get blueprint: " + err.Error())
 	}
 	return h.wrapResult(bp)
 }
 
-// ExecuteBlueprintPublish publishes a draft blueprint.
+// ExecuteBlueprintPublish publishes the caller's own private draft blueprint.
+// Global blueprints are immutable.
 func (h *MCPBlueprintToolHandler) ExecuteBlueprintPublish(ctx context.Context, projectID string, args map[string]any) (*mcp.ToolResult, error) {
 	id, _ := args["id"].(string)
 	if id == "" {
 		return errResult("id is required")
 	}
 
-	bp, err := h.svc.PublishBlueprint(ctx, id)
+	bp, err := h.svc.PublishBlueprint(ctx, projectID, id)
 	if err != nil {
 		return errResult("failed to publish blueprint: " + err.Error())
 	}
@@ -161,14 +169,15 @@ func (h *MCPBlueprintToolHandler) ExecuteBlueprintUnapply(ctx context.Context, p
 	return h.wrapResult(result)
 }
 
-// ExecuteBlueprintVersions lists all versions of a blueprint name.
+// ExecuteBlueprintVersions lists all versions of a blueprint name within the
+// caller's read scope (global + own private).
 func (h *MCPBlueprintToolHandler) ExecuteBlueprintVersions(ctx context.Context, projectID string, args map[string]any) (*mcp.ToolResult, error) {
 	name, _ := args["name"].(string)
 	if name == "" {
 		return errResult("name is required")
 	}
 
-	bps, err := h.svc.ListVersions(ctx, name)
+	bps, err := h.svc.ListVersions(ctx, projectID, name)
 	if err != nil {
 		return errResult("failed to list blueprint versions: " + err.Error())
 	}
@@ -182,4 +191,53 @@ func (h *MCPBlueprintToolHandler) ExecuteBlueprintListApplied(ctx context.Contex
 		return errResult("failed to list applied blueprints: " + err.Error())
 	}
 	return h.wrapResult(apps)
+}
+
+// ExecuteBlueprintNewVersion clones a blueprint (global built-in or the
+// caller's own) into a new private draft version in the caller's project.
+func (h *MCPBlueprintToolHandler) ExecuteBlueprintNewVersion(ctx context.Context, projectID string, args map[string]any) (*mcp.ToolResult, error) {
+	id, _ := args["id"].(string)
+	if id == "" {
+		return errResult("id is required")
+	}
+	version, _ := args["version"].(string)
+	if version == "" {
+		return errResult("version is required")
+	}
+
+	bp, err := h.svc.NewVersion(ctx, projectID, id, version)
+	if err != nil {
+		return errResult("failed to create new blueprint version: " + err.Error())
+	}
+	return h.wrapResult(bp)
+}
+
+// ExecuteBlueprintUpdate updates the caller's own private draft blueprint's
+// description, author, and/or manifest. Global blueprints are immutable.
+func (h *MCPBlueprintToolHandler) ExecuteBlueprintUpdate(ctx context.Context, projectID string, args map[string]any) (*mcp.ToolResult, error) {
+	id, _ := args["id"].(string)
+	if id == "" {
+		return errResult("id is required")
+	}
+
+	req := &UpdateBlueprintRequest{}
+	if v, ok := args["description"].(string); ok && v != "" {
+		req.Description = &v
+	}
+	if v, ok := args["author"].(string); ok && v != "" {
+		req.Author = &v
+	}
+	if v, ok := args["manifest"]; ok && v != nil {
+		manifest, err := toRawManifest(v)
+		if err != nil {
+			return errResult("invalid manifest: " + err.Error())
+		}
+		req.Manifest = manifest
+	}
+
+	bp, err := h.svc.UpdateBlueprint(ctx, projectID, id, req)
+	if err != nil {
+		return errResult("failed to update blueprint: " + err.Error())
+	}
+	return h.wrapResult(bp)
 }

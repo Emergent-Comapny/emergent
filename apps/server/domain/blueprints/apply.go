@@ -56,7 +56,7 @@ type ApplyResult struct {
 // seed errors are best-effort (recorded in the result counts). Each step is
 // idempotent, so re-applying converges; retry after fixing the manifest.
 func (s *Service) Apply(ctx context.Context, blueprintID, projectID, userID string, opts ApplyOptions) (*ApplyResult, error) {
-	bp, err := s.repo.GetByID(ctx, blueprintID)
+	bp, err := s.repo.GetByID(ctx, projectID, blueprintID)
 	if err != nil {
 		return nil, err
 	}
