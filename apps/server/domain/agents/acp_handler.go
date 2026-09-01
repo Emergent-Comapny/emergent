@@ -915,9 +915,13 @@ func (h *ACPHandler) ResumeRun(c echo.Context) error {
 		userID = user.ID
 	}
 
-	// Answer the question
-	if err := h.repo.AnswerQuestion(ctx, questions[0].ID, responseText, userID); err != nil {
+	// Answer the question (atomically claim; a concurrent responder wins).
+	claimed, err := h.repo.AnswerQuestion(ctx, questions[0].ID, responseText, userID)
+	if err != nil {
 		return apperror.NewInternal("failed to answer question", err)
+	}
+	if !claimed {
+		return apperror.ErrConflict.WithMessage("question is no longer pending")
 	}
 
 	// Build resume message

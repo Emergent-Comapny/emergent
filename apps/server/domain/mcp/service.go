@@ -53,6 +53,9 @@ type Service struct {
 	// MCP registry tool handler (injected to break import cycle)
 	mcpRegistryToolHandler MCPRegistryToolHandler
 
+	// Blueprint tool handler (injected to break import cycle)
+	blueprintToolHandler BlueprintToolHandler
+
 	// Brave Search API configuration
 	braveSearchAPIKey  string
 	braveSearchTimeout time.Duration
@@ -183,6 +186,12 @@ func NewService(p ServiceParams) *Service {
 // SetAgentToolHandler sets the agent tool handler (called after construction to break circular init)
 func (s *Service) SetAgentToolHandler(h AgentToolHandler) {
 	s.agentToolHandler = h
+}
+
+// SetBlueprintToolHandler sets the blueprint tool handler (called after
+// construction to break the circular init between mcp and blueprints).
+func (s *Service) SetBlueprintToolHandler(h BlueprintToolHandler) {
+	s.blueprintToolHandler = h
 }
 
 // SetSessionTitleHandler sets the session title handler (called after construction to break circular init)
@@ -1297,6 +1306,7 @@ func (s *Service) GetToolDefinitions() []ToolDefinition {
 	tools = append(tools, traceToolDefinitions()...)
 	tools = append(tools, queryToolDefinitions()...)
 	tools = append(tools, domainToolDefinitions()...)
+	tools = append(tools, blueprintsToolDefinitions()...)
 
 	// Journal tools
 	tools = append(tools, ToolDefinition{
@@ -1959,6 +1969,12 @@ func (s *Service) ExecuteTool(ctx context.Context, projectID string, toolName st
 		return s.executeJournalList(ctx, projectID, args)
 	case "journal-add-note":
 		return s.executeJournalAddNote(ctx, projectID, args)
+
+	// Blueprint tools (delegated to the blueprints domain via BlueprintToolHandler)
+	case "blueprint-create", "blueprint-list", "blueprint-get", "blueprint-publish",
+		"blueprint-apply", "blueprint-unapply", "blueprint-versions", "blueprint-list-applied",
+		"blueprint-new-version", "blueprint-update":
+		return s.delegateBlueprintTool(ctx, projectID, toolName, args)
 
 	default:
 		// Attempt to route to a connected relay. Relay tools are named
@@ -4749,6 +4765,38 @@ func (s *Service) delegateAgentTool(ctx context.Context, projectID, toolName str
 
 	default:
 		return nil, fmt.Errorf("unknown agent tool: %s", toolName)
+	}
+}
+
+// delegateBlueprintTool dispatches blueprint tool calls to the BlueprintToolHandler.
+func (s *Service) delegateBlueprintTool(ctx context.Context, projectID, toolName string, args map[string]any) (*ToolResult, error) {
+	if s.blueprintToolHandler == nil {
+		return nil, fmt.Errorf("blueprint tools not available: handler not configured")
+	}
+
+	switch toolName {
+	case "blueprint-create":
+		return s.blueprintToolHandler.ExecuteBlueprintCreate(ctx, projectID, args)
+	case "blueprint-list":
+		return s.blueprintToolHandler.ExecuteBlueprintList(ctx, projectID, args)
+	case "blueprint-get":
+		return s.blueprintToolHandler.ExecuteBlueprintGet(ctx, projectID, args)
+	case "blueprint-publish":
+		return s.blueprintToolHandler.ExecuteBlueprintPublish(ctx, projectID, args)
+	case "blueprint-apply":
+		return s.blueprintToolHandler.ExecuteBlueprintApply(ctx, projectID, args)
+	case "blueprint-unapply":
+		return s.blueprintToolHandler.ExecuteBlueprintUnapply(ctx, projectID, args)
+	case "blueprint-versions":
+		return s.blueprintToolHandler.ExecuteBlueprintVersions(ctx, projectID, args)
+	case "blueprint-list-applied":
+		return s.blueprintToolHandler.ExecuteBlueprintListApplied(ctx, projectID, args)
+	case "blueprint-new-version":
+		return s.blueprintToolHandler.ExecuteBlueprintNewVersion(ctx, projectID, args)
+	case "blueprint-update":
+		return s.blueprintToolHandler.ExecuteBlueprintUpdate(ctx, projectID, args)
+	default:
+		return nil, fmt.Errorf("unknown blueprint tool: %s", toolName)
 	}
 }
 

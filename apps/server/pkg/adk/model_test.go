@@ -2,11 +2,16 @@ package adk
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
 	"github.com/emergent-company/emergent.memory/internal/config"
+	"google.golang.org/adk/model"
 	"google.golang.org/genai"
 )
 
@@ -442,5 +447,135 @@ func TestModelFactoryCreateModel_FallsBackToProviderConfig(t *testing.T) {
 	}
 	if llm == nil {
 		t.Fatal("CreateModel() returned nil model")
+	}
+}
+
+func TestIsReasonerModel(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want bool
+	}{
+		{"deepseek-v4-flash", true},
+		{"deepseek-v4-pro", true},        // was previously missed — v4-pro rejects tool_choice too
+		{"openai/deepseek-v4-pro", true}, // provider-prefixed form
+		{"deepseek-reasoner", true},
+		{"kvasir", true},
+		{"deepseek-chat", false}, // v3, non-reasoner — supports tool_choice
+		{"openai/gpt-4o", false},
+		{"google/gemini-2.5-flash", false},
+	} {
+		if got := isReasonerModel(tc.name); got != tc.want {
+			t.Errorf("isReasonerModel(%q) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestIsDeepSeekModel(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want bool
+	}{
+		{"deepseek-v4-pro", true},
+		{"deepseek-v4-flash", true},
+		{"openai/deepseek-v4-pro", true},
+		{"deepseek-reasoner", true},
+		{"qwen3-32b", false},
+		{"openai/gpt-4o", false},
+		{"google/gemini-2.5-flash", false},
+	} {
+		if got := isDeepSeekModel(tc.name); got != tc.want {
+			t.Errorf("isDeepSeekModel(%q) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestBuildMessages_DeepSeekReasoningEcho verifies that DeepSeek assistant
+// messages always carry reasoning_content (even empty), while non-DeepSeek
+// models omit it — matching opencode's unconditional-echo invariant.
+func TestBuildMessages_DeepSeekReasoningEcho(t *testing.T) {
+	toolCall := func(id string) *genai.Part {
+		return &genai.Part{
+			FunctionCall: &genai.FunctionCall{ID: id, Name: "web-fetch", Args: map[string]any{"url": "https://example.com"}},
+		}
+	}
+	thought := func(text string) *genai.Part {
+		return &genai.Part{Text: text, Thought: true}
+	}
+
+	// DeepSeek: tool-call turn with no reasoning must still carry empty reasoning_content.
+	// (ensureToolCallResponsePairs appends a synthetic tool response, so there are 2 messages.)
+	msgs := buildMessages([]*genai.Content{{Role: "model", Parts: []*genai.Part{toolCall("call_1")}}}, true)
+	if len(msgs) < 1 {
+		t.Fatal("got no messages, want at least the assistant message")
+	}
+	if msgs[0].Role != "assistant" {
+		t.Fatalf("first message role = %q, want assistant", msgs[0].Role)
+	}
+	if msgs[0].ReasoningContent == nil {
+		t.Fatal("deepseek assistant tool turn: ReasoningContent is nil, want empty string")
+	}
+	if *msgs[0].ReasoningContent != "" {
+		t.Errorf("deepseek assistant tool turn: reasoning_content = %q, want empty", *msgs[0].ReasoningContent)
+	}
+
+	// DeepSeek: reasoning turn must carry the reasoning text.
+	msgs = buildMessages([]*genai.Content{{Role: "model", Parts: []*genai.Part{thought("thinking here"), {Text: "final answer"}}}}, true)
+	if len(msgs) != 1 {
+		t.Fatalf("got %d messages, want 1", len(msgs))
+	}
+	if msgs[0].ReasoningContent == nil || *msgs[0].ReasoningContent != "thinking here" {
+		t.Errorf("deepseek assistant reasoning turn: reasoning_content = %v, want %q", msgs[0].ReasoningContent, "thinking here")
+	}
+
+	// Non-DeepSeek: tool-call turn omits reasoning_content.
+	msgs = buildMessages([]*genai.Content{{Role: "model", Parts: []*genai.Part{toolCall("call_1")}}}, false)
+	if len(msgs) < 1 {
+		t.Fatal("got no messages, want at least the assistant message")
+	}
+	if msgs[0].ReasoningContent != nil {
+		t.Errorf("non-deepseek assistant tool turn: ReasoningContent = %v, want nil", msgs[0].ReasoningContent)
+	}
+}
+
+// TestGenerateContent_DeepSeekDisablesThinking verifies that a DeepSeek model
+// with tools present sends `thinking: {"type": "disabled"}` (not the vLLM-only
+// chat_template_kwargs knob) so DeepSeek doesn't enter thinking mode and then
+// reject follow-up turns for missing reasoning_content.
+func TestGenerateContent_DeepSeekDisablesThinking(t *testing.T) {
+	var captured map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &captured)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer srv.Close()
+
+	m := NewOpenAICompatibleModel(srv.URL, "test-key", "deepseek-v4-pro")
+
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{genai.NewContentFromText("hi", genai.RoleUser)},
+		Config: &genai.GenerateContentConfig{
+			Tools: []*genai.Tool{
+				{FunctionDeclarations: []*genai.FunctionDeclaration{{Name: "web-fetch"}}},
+			},
+		},
+	}
+
+	for _, err := range m.GenerateContent(context.Background(), req, false) {
+		if err != nil {
+			t.Fatalf("GenerateContent returned error: %v", err)
+		}
+	}
+
+	thinking, ok := captured["thinking"].(map[string]any)
+	if !ok {
+		t.Fatalf("request body missing thinking field; body=%v", captured)
+	}
+	if thinking["type"] != "disabled" {
+		t.Errorf("thinking.type = %v, want disabled", thinking["type"])
+	}
+	if _, hasKwargs := captured["chat_template_kwargs"]; hasKwargs {
+		t.Errorf("deepseek request should not set chat_template_kwargs; body=%v", captured)
 	}
 }

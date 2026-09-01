@@ -67,7 +67,7 @@ func (m *openaiCompatibleModel) Name() string {
 type openaiMessage struct {
 	Role             string           `json:"role"`
 	Content          string           `json:"content,omitempty"`
-	ReasoningContent string           `json:"reasoning_content,omitempty"`
+	ReasoningContent *string          `json:"reasoning_content,omitempty"`
 	ToolCallID       string           `json:"tool_call_id,omitempty"`
 	ToolCalls        []openaiToolCall `json:"tool_calls,omitempty"`
 	Name             string           `json:"name,omitempty"`
@@ -108,6 +108,10 @@ type openaiRequest struct {
 	// the top-level enable_thinking field does not work correctly (it empties
 	// the response content field).
 	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs,omitempty"`
+	// Thinking is DeepSeek's thinking-mode toggle ({"type":"enabled"|"disabled"}).
+	// DeepSeek ignores chat_template_kwargs (a vLLM/Qwen3 mechanism), so DeepSeek
+	// models must use this top-level field instead to disable thinking.
+	Thinking any `json:"thinking,omitempty"`
 }
 
 type responseFormat struct {
@@ -195,13 +199,21 @@ var coordinationTools = map[string]bool{
 // support function calling but reject an explicit tool_choice constraint.
 func isReasonerModel(name string) bool {
 	lower := strings.ToLower(name)
-	reasonerKeywords := []string{"reasoner", "deepseek-v4-flash", "deepseek-r1", "kvasir"}
+	reasonerKeywords := []string{"reasoner", "deepseek-v4-", "deepseek-r1", "kvasir"}
 	for _, kw := range reasonerKeywords {
 		if strings.Contains(lower, kw) {
 			return true
 		}
 	}
 	return false
+}
+
+// isDeepSeekModel returns true for DeepSeek models. DeepSeek toggles thinking via
+// a top-level `thinking` field (and silently ignores chat_template_kwargs), and
+// requires reasoning_content to be echoed back on every assistant turn while
+// thinking mode is on — so these models need dedicated disable and echo paths.
+func isDeepSeekModel(name string) bool {
+	return strings.Contains(strings.ToLower(name), "deepseek")
 }
 
 // hasSubstantiveToolCall returns true when the conversation history contains a
@@ -271,7 +283,7 @@ func buildOpenAITools(tools []*genai.Tool) []openaiTool {
 // every tool_call_id in an assistant message's tool_calls must have a
 // matching tool response. Orphaned calls get synthetic responses patched
 // in to prevent DeepSeek's strict API from rejecting the request.
-func buildMessages(contents []*genai.Content) []openaiMessage {
+func buildMessages(contents []*genai.Content, deepseek bool) []openaiMessage {
 	var messages []openaiMessage
 	for _, content := range contents {
 		role := mapRole(content.Role)
@@ -334,15 +346,19 @@ func buildMessages(contents []*genai.Content) []openaiMessage {
 		// subsequent turn and can cause context-size errors on long sessions.
 		// The tool results themselves convey what was done; the narrative adds
 		// no value for continuation.
-		// However, reasoning_content MUST be echoed back for DeepSeek — omitting it
-		// causes a 400 "reasoning_content must be passed back" error on the next turn.
+		// However, reasoning_content MUST be echoed back for DeepSeek on every
+		// assistant turn — including tool-call sub-turns — or the API returns a
+		// 400 "reasoning_content must be passed back" error on the next turn.
+		// DeepSeek treats a missing field as missing reasoning, so we always set
+		// it (even empty) on assistant messages, matching opencode's approach.
 		if role == "assistant" && len(funcCalls) > 0 {
 			msg := openaiMessage{
 				Role:      "assistant",
 				ToolCalls: funcCalls,
 			}
-			if len(reasoningParts) > 0 {
-				msg.ReasoningContent = strings.Join(reasoningParts, "\n")
+			if deepseek {
+				rc := strings.Join(reasoningParts, "\n")
+				msg.ReasoningContent = &rc
 			}
 			messages = append(messages, msg)
 			continue
@@ -375,14 +391,13 @@ func buildMessages(contents []*genai.Content) []openaiMessage {
 				msg.Content = strings.Join(textParts, "\n")
 			}
 			// Echo reasoning_content back in assistant history turns.
-			// DeepSeek requires the reasoning_content it produced to be
-			// passed back verbatim on subsequent turns; omitting it causes
-			// a 400 "reasoning_content must be passed back" error.
-			// Qwen3/vLLM does NOT want this — but since Qwen3 sets
-			// enableThinking=false via chat_template_kwargs it won't produce
-			// reasoning_content in the first place, so this path is safe for both.
-			if role == "assistant" && len(reasoningParts) > 0 {
-				msg.ReasoningContent = strings.Join(reasoningParts, "\n")
+			// DeepSeek requires the reasoning_content it produced to be passed back
+			// verbatim on subsequent turns, and treats a missing field as missing
+			// reasoning — so we always set it (even empty) on DeepSeek assistant
+			// messages. Qwen3/vLLM does not want this field at all.
+			if deepseek && role == "assistant" {
+				rc := strings.Join(reasoningParts, "\n")
+				msg.ReasoningContent = &rc
 			}
 			messages = append(messages, msg)
 		}
@@ -477,7 +492,7 @@ func ensureToolCallResponsePairs(messages []openaiMessage) []openaiMessage {
 // including full function/tool calling support.
 func (m *openaiCompatibleModel) GenerateContent(ctx context.Context, req *model.LLMRequest, stream bool) iter.Seq2[*model.LLMResponse, error] {
 	return func(yield func(*model.LLMResponse, error) bool) {
-		messages := buildMessages(req.Contents)
+		messages := buildMessages(req.Contents, isDeepSeekModel(m.modelName))
 
 		// Prepend system instruction if provided (OpenAI uses a system-role message).
 		if req.Config != nil && req.Config.SystemInstruction != nil {
@@ -532,7 +547,15 @@ func (m *openaiCompatibleModel) GenerateContent(ctx context.Context, req *model.
 				wantThinking = false // default: disable when tools present
 			}
 			if !wantThinking {
-				body.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
+				if isDeepSeekModel(m.modelName) {
+					// DeepSeek toggles thinking via a top-level `thinking` field; it
+					// ignores chat_template_kwargs. Without this, DeepSeek V4 stays in
+					// thinking mode, emits reasoning_content, and — because tools are
+					// present — requires it echoed back on every turn, else 400.
+					body.Thinking = map[string]any{"type": "disabled"}
+				} else {
+					body.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
+				}
 			}
 		}
 

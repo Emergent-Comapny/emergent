@@ -1478,8 +1478,12 @@ func (h *MCPToolHandler) ExecuteRespondToAgentQuestion(ctx context.Context, proj
 		return errResult(fmt.Sprintf("question is already %s", question.Status))
 	}
 
-	if err := h.repo.AnswerQuestion(ctx, questionID, response, "mcp-tool"); err != nil {
+	claimed, err := h.repo.AnswerQuestion(ctx, questionID, response, "mcp-tool")
+	if err != nil {
 		return errResult("failed to answer question: " + err.Error())
+	}
+	if !claimed {
+		return errResult("question is no longer pending")
 	}
 
 	// Resume the agent in a background goroutine (non-blocking)

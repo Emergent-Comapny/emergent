@@ -56,7 +56,7 @@ type ApplyResult struct {
 // seed errors are best-effort (recorded in the result counts). Each step is
 // idempotent, so re-applying converges; retry after fixing the manifest.
 func (s *Service) Apply(ctx context.Context, blueprintID, projectID, userID string, opts ApplyOptions) (*ApplyResult, error) {
-	bp, err := s.repo.GetByID(ctx, blueprintID)
+	bp, err := s.repo.GetByID(ctx, projectID, blueprintID)
 	if err != nil {
 		return nil, err
 	}
@@ -88,13 +88,13 @@ func (s *Service) Apply(ctx context.Context, blueprintID, projectID, userID stri
 
 	// Packs: create-or-skip by (name, version); assign runs on EVERY apply so
 	// any project applying the blueprint gets the pack's types registered.
-	result.Packs, err = s.applyPacks(ctx, projectID, userID, manifest.Packs)
+	result.Packs, err = s.applyPacks(ctx, projectID, blueprintID, userID, manifest.Packs)
 	if err != nil {
 		return nil, err
 	}
 
 	// Agents: create-or-update by name (skipped entirely if repo not wired).
-	result.Agents, err = s.applyAgents(ctx, projectID, manifest.Agents)
+	result.Agents, err = s.applyAgents(ctx, projectID, blueprintID, manifest.Agents)
 	if err != nil {
 		return nil, err
 	}
@@ -108,6 +108,13 @@ func (s *Service) Apply(ctx context.Context, blueprintID, projectID, userID stri
 	// Seed: idempotent object upserts then relationships (best-effort, non-fatal).
 	result.Seed = s.applySeed(ctx, projectUUID, actorID, manifest.Seed)
 
+	// Record the application (provenance) only after all materialization steps
+	// succeeded. A partial apply that errors out returns before this, so it is
+	// never recorded; a retry converges and then records.
+	if err := s.recordApplication(ctx, bp, projectID, userID); err != nil {
+		return nil, err
+	}
+
 	return result, nil
 }
 
@@ -116,7 +123,7 @@ func (s *Service) Apply(ctx context.Context, blueprintID, projectID, userID stri
 // apply so that a second project applying the same blueprint still gets the
 // pack's types registered. AssignPack with Merge=true is additive (existing
 // project types win property conflicts) and idempotent when already assigned.
-func (s *Service) applyPacks(ctx context.Context, projectID, userID string, packs []PackManifest) (ApplyCounts, error) {
+func (s *Service) applyPacks(ctx context.Context, projectID, blueprintID, userID string, packs []PackManifest) (ApplyCounts, error) {
 	var counts ApplyCounts
 	for _, p := range packs {
 		if p.Name == "" || p.Version == "" {
@@ -126,6 +133,13 @@ func (s *Service) applyPacks(ctx context.Context, projectID, userID string, pack
 		pack, err := s.schemasRepo.GetPackByNameVersion(ctx, p.Name, p.Version)
 		switch {
 		case err == nil:
+			// Pack exists globally. Sync its definition (description + type
+			// schemas) from the manifest so source cleanups propagate without a
+			// version bump. Only the owning project can update; a non-owner 404
+			// is benign (the pack still assigns below).
+			if uerr := s.updateExistingPack(ctx, projectID, pack, p); uerr != nil && !isNotFound(uerr) {
+				return counts, uerr
+			}
 			counts.Skipped++ // pack already exists globally; still assign below
 		case isNotFound(err):
 			objectTypes, err := json.Marshal(p.ObjectTypes)
@@ -153,15 +167,46 @@ func (s *Service) applyPacks(ctx context.Context, projectID, userID string, pack
 			return counts, err
 		}
 
-		// ALWAYS assign (idempotent; Merge=true additive).
+		// ALWAYS assign (idempotent; Merge=true additive). AutoUninstall makes
+		// the migration worker soft-delete the previous version's assignment
+		// after a successful migration, so the compiled schema view does not
+		// keep duplicated types from every installed version.
 		if _, err := s.schemasSvc.AssignPack(ctx, projectID, userID, &schemas.AssignPackRequest{
-			SchemaID: pack.ID,
-			Merge:    true,
+			SchemaID:          pack.ID,
+			Merge:             true,
+			SourceBlueprintID: &blueprintID,
+			AutoUninstall:     true,
 		}); err != nil {
+			return counts, err
+		}
+		// Record this blueprint's dependency claim on the pack (idempotent).
+		if err := s.repo.AddPackClaim(ctx, blueprintID, projectID, pack.ID); err != nil {
 			return counts, err
 		}
 	}
 	return counts, nil
+}
+
+// updateExistingPack syncs an already-existing global pack's definition
+// (description + object/relationship type schemas) with the current manifest.
+// This propagates source cleanups (e.g. removed template hints from type
+// descriptions) to the registry without requiring a version bump. Only the
+// owning project can update; a non-owner returns ErrNotFound (benign).
+func (s *Service) updateExistingPack(ctx context.Context, projectID string, pack *schemas.GraphMemorySchema, p PackManifest) error {
+	objectTypes, err := json.Marshal(p.ObjectTypes)
+	if err != nil {
+		return apperror.ErrBadRequest.WithMessage("invalid objectTypes in pack " + p.Name)
+	}
+	relationshipTypes, err := json.Marshal(p.RelationshipTypes)
+	if err != nil {
+		return apperror.ErrBadRequest.WithMessage("invalid relationshipTypes in pack " + p.Name)
+	}
+	_, err = s.schemasSvc.UpdatePack(ctx, pack.ID, projectID, &schemas.UpdatePackRequest{
+		Description:             &p.Description,
+		ObjectTypeSchemas:       objectTypes,
+		RelationshipTypeSchemas: relationshipTypes,
+	})
+	return err
 }
 
 // applyAgents creates or updates agent definitions by name within the project.
@@ -172,7 +217,7 @@ func (s *Service) applyPacks(ctx context.Context, projectID, userID string, pack
 // update. Requires the agents repository to be wired via SetAgentRepo;
 // otherwise the step is skipped with a warning and all entries counted as
 // skipped.
-func (s *Service) applyAgents(ctx context.Context, projectID string, agentManifests []AgentManifest) (ApplyCounts, error) {
+func (s *Service) applyAgents(ctx context.Context, projectID, blueprintID string, agentManifests []AgentManifest) (ApplyCounts, error) {
 	var counts ApplyCounts
 	if s.agentRepo == nil {
 		if len(agentManifests) > 0 {
@@ -193,7 +238,13 @@ func (s *Service) applyAgents(ctx context.Context, projectID string, agentManife
 			return counts, apperror.ErrDatabase.WithInternal(err)
 		}
 		if existing != nil {
-			// Non-destructive: mutate only manifest-driven fields.
+			// Owned by a different blueprint — skip, do not overwrite.
+			if existing.SourceBlueprintID != nil && *existing.SourceBlueprintID != blueprintID {
+				counts.Skipped++
+				continue
+			}
+			// Manual/pre-existing (nil) or owned by us — update in place, leave
+			// ownership untouched (do not claim pre-existing definitions).
 			applyAgentManifestToExisting(existing, &am)
 			if err := s.agentRepo.UpdateDefinition(ctx, existing); err != nil {
 				return counts, apperror.ErrDatabase.WithInternal(err)
@@ -201,6 +252,7 @@ func (s *Service) applyAgents(ctx context.Context, projectID string, agentManife
 			counts.Updated++
 		} else {
 			def := buildAgentDefinition(&am, projectID)
+			def.SourceBlueprintID = &blueprintID
 			if err := s.agentRepo.CreateDefinition(ctx, def); err != nil {
 				return counts, apperror.ErrDatabase.WithInternal(err)
 			}

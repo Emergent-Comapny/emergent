@@ -54,14 +54,16 @@ func TestApply_AgentMaterialization_NonDestructiveUpdate(t *testing.T) {
 		return raw
 	}
 
-	// Create + publish the blueprint.
+	// Create + publish the blueprint (private to the project so it can be
+	// published — global built-ins are immutable).
 	bp, err := svc.CreateBlueprint(ctx, &CreateBlueprintRequest{
-		Name:     uniqueName("apply-bp"),
-		Version:  "1.0.0",
-		Manifest: makeManifest("hi"),
+		Name:      uniqueName("apply-bp"),
+		Version:   "1.0.0",
+		Manifest:  makeManifest("hi"),
+		ProjectID: &projectID,
 	})
 	require.NoError(t, err)
-	_, err = svc.PublishBlueprint(ctx, bp.ID)
+	_, err = svc.PublishBlueprint(ctx, projectID, bp.ID)
 	require.NoError(t, err)
 
 	// First apply creates the agent definition (Enabled defaults to true).
@@ -83,11 +85,11 @@ func TestApply_AgentMaterialization_NonDestructiveUpdate(t *testing.T) {
 	require.NoError(t, agentRepo.UpdateDefinition(ctx, def))
 
 	// Newer blueprint version with a changed prompt, published and applied.
-	clone, err := svc.NewVersion(ctx, bp.ID, "1.1.0")
+	clone, err := svc.NewVersion(ctx, projectID, bp.ID, "1.1.0")
 	require.NoError(t, err)
-	clone, err = svc.UpdateBlueprint(ctx, clone.ID, &UpdateBlueprintRequest{Manifest: makeManifest("hi v2")})
+	clone, err = svc.UpdateBlueprint(ctx, projectID, clone.ID, &UpdateBlueprintRequest{Manifest: makeManifest("hi v2")})
 	require.NoError(t, err)
-	_, err = svc.PublishBlueprint(ctx, clone.ID)
+	_, err = svc.PublishBlueprint(ctx, projectID, clone.ID)
 	require.NoError(t, err)
 
 	res, err = svc.Apply(ctx, clone.ID, projectID, uuid.NewString(), ApplyOptions{})

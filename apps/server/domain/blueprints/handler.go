@@ -44,6 +44,14 @@ func (h *Handler) CreateBlueprint(c echo.Context) error {
 		return apperror.ErrBadRequest.WithMessage("invalid request body")
 	}
 
+	// Private by default: when the caller has a project context and did not
+	// explicitly request global scope, scope the new blueprint to the caller's
+	// project. A caller without a project can only create global blueprints.
+	projectID := user.ProjectID
+	if req.ProjectID == nil && projectID != "" {
+		req.ProjectID = &projectID
+	}
+
 	bp, err := h.svc.CreateBlueprint(c.Request().Context(), &req)
 	if err != nil {
 		return err
@@ -71,7 +79,7 @@ func (h *Handler) ListBlueprints(c echo.Context) error {
 	}
 
 	nameFilter := c.QueryParam("name")
-	blueprints, err := h.svc.ListBlueprints(c.Request().Context(), nameFilter)
+	blueprints, err := h.svc.ListBlueprints(c.Request().Context(), user.ProjectID, nameFilter)
 	if err != nil {
 		return err
 	}
@@ -103,7 +111,7 @@ func (h *Handler) GetBlueprint(c echo.Context) error {
 		return apperror.ErrBadRequest.WithMessage("id is required")
 	}
 
-	bp, err := h.svc.GetBlueprint(c.Request().Context(), id)
+	bp, err := h.svc.GetBlueprint(c.Request().Context(), user.ProjectID, id)
 	if err != nil {
 		return err
 	}
@@ -143,7 +151,7 @@ func (h *Handler) UpdateBlueprint(c echo.Context) error {
 		return apperror.ErrBadRequest.WithMessage("invalid request body")
 	}
 
-	bp, err := h.svc.UpdateBlueprint(c.Request().Context(), id, &req)
+	bp, err := h.svc.UpdateBlueprint(c.Request().Context(), user.ProjectID, id, &req)
 	if err != nil {
 		return err
 	}
@@ -176,7 +184,7 @@ func (h *Handler) PublishBlueprint(c echo.Context) error {
 		return apperror.ErrBadRequest.WithMessage("id is required")
 	}
 
-	bp, err := h.svc.PublishBlueprint(c.Request().Context(), id)
+	bp, err := h.svc.PublishBlueprint(c.Request().Context(), user.ProjectID, id)
 	if err != nil {
 		return err
 	}
@@ -208,7 +216,7 @@ func (h *Handler) DeprecateBlueprint(c echo.Context) error {
 		return apperror.ErrBadRequest.WithMessage("id is required")
 	}
 
-	bp, err := h.svc.DeprecateBlueprint(c.Request().Context(), id)
+	bp, err := h.svc.DeprecateBlueprint(c.Request().Context(), user.ProjectID, id)
 	if err != nil {
 		return err
 	}
@@ -248,7 +256,7 @@ func (h *Handler) NewVersion(c echo.Context) error {
 		return apperror.ErrBadRequest.WithMessage("invalid request body")
 	}
 
-	bp, err := h.svc.NewVersion(c.Request().Context(), id, req.Version)
+	bp, err := h.svc.NewVersion(c.Request().Context(), user.ProjectID, id, req.Version)
 	if err != nil {
 		return err
 	}
@@ -326,7 +334,7 @@ func (h *Handler) DeleteBlueprint(c echo.Context) error {
 		return apperror.ErrBadRequest.WithMessage("id is required")
 	}
 
-	if err := h.svc.DeleteBlueprint(c.Request().Context(), id); err != nil {
+	if err := h.svc.DeleteBlueprint(c.Request().Context(), user.ProjectID, id); err != nil {
 		return err
 	}
 
@@ -356,10 +364,78 @@ func (h *Handler) ListVersionsByName(c echo.Context) error {
 		return apperror.ErrBadRequest.WithMessage("name is required")
 	}
 
-	blueprints, err := h.svc.ListVersions(c.Request().Context(), name)
+	blueprints, err := h.svc.ListVersions(c.Request().Context(), user.ProjectID, name)
 	if err != nil {
 		return err
 	}
 
 	return c.JSON(http.StatusOK, blueprints)
+}
+
+// ListAppliedBlueprints handles GET /api/blueprints/applied.
+// @Summary      List applied blueprints
+// @Description  Returns the blueprints applied to the caller's project, joined with blueprint metadata and the last-applied manifest checksum
+// @Tags         blueprints
+// @Produce      json
+// @Success      200 {array} AppliedBlueprint "Applied blueprints"
+// @Failure      400 {object} apperror.Error "Project context required"
+// @Failure      401 {object} apperror.Error "Unauthorized"
+// @Failure      500 {object} apperror.Error "Internal server error"
+// @Router       /api/blueprints/applied [get]
+// @Security     bearerAuth
+func (h *Handler) ListAppliedBlueprints(c echo.Context) error {
+	user := auth.GetUser(c)
+	if user == nil {
+		return apperror.ErrUnauthorized
+	}
+
+	projectID := user.ProjectID
+	if projectID == "" {
+		return apperror.ErrBadRequest.WithMessage("project context required (X-Project-ID header or API token)")
+	}
+
+	out, err := h.svc.ListApplied(c.Request().Context(), projectID)
+	if err != nil {
+		return err
+	}
+
+	return c.JSON(http.StatusOK, out)
+}
+
+// UnapplyBlueprint handles POST /api/blueprints/:id/unapply.
+// @Summary      Unapply blueprint
+// @Description  Reverses a blueprint's apply for the caller's project: deletes its agents, soft-removes its pack assignments, and marks the application unapplied. Skills and seed objects are skipped (global/shared and unattributed respectively).
+// @Tags         blueprints
+// @Produce      json
+// @Param        id path string true "Blueprint ID (UUID)"
+// @Success      200 {object} UnapplyResult "Unapply result"
+// @Failure      400 {object} apperror.Error "Bad request / project context required"
+// @Failure      401 {object} apperror.Error "Unauthorized"
+// @Failure      404 {object} apperror.Error "Blueprint not found"
+// @Failure      409 {object} apperror.Error "Blueprint not applied to this project"
+// @Failure      500 {object} apperror.Error "Internal server error"
+// @Router       /api/blueprints/{id}/unapply [post]
+// @Security     bearerAuth
+func (h *Handler) UnapplyBlueprint(c echo.Context) error {
+	user := auth.GetUser(c)
+	if user == nil {
+		return apperror.ErrUnauthorized
+	}
+
+	id := c.Param("id")
+	if id == "" {
+		return apperror.ErrBadRequest.WithMessage("id is required")
+	}
+
+	projectID := user.ProjectID
+	if projectID == "" {
+		return apperror.ErrBadRequest.WithMessage("project context required (X-Project-ID header or API token)")
+	}
+
+	result, err := h.svc.Unapply(c.Request().Context(), id, projectID)
+	if err != nil {
+		return err
+	}
+
+	return c.JSON(http.StatusOK, result)
 }

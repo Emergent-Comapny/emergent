@@ -107,10 +107,14 @@ type StreamRequest struct {
 
 // StreamEvent represents an SSE event from the chat stream.
 type StreamEvent struct {
-	Type    string `json:"type"` // meta, token, done, error
+	Type    string `json:"type"` // meta, token, thinking, done, error
 	Token   string `json:"token,omitempty"`
 	Message string `json:"message,omitempty"`
 	Error   string `json:"error,omitempty"`
+	// Thinking fields (emitted in "thinking" events)
+	ID   string `json:"id,omitempty"`
+	Role string `json:"role,omitempty"` // "operator" (planning) or "reasoning" (chain-of-thought)
+	Text string `json:"text,omitempty"`
 	// Meta fields (emitted in "meta" event)
 	ConversationID string `json:"conversationId,omitempty"`
 }

@@ -1510,6 +1510,46 @@ func (r *Repository) UpdateSuspendContext(ctx context.Context, runID string, sc 
 	return err
 }
 
+// MarkToolConfirmationDecision atomically records a tool-policy confirmation
+// decision in the run's suspend_context batch and reports whether every
+// confirmation in the batch is now decided (resume=true). Uses FOR UPDATE on
+// the run row so concurrent answers serialize and exactly one caller observes
+// resume=true. Non-batch (legacy single-confirmation) runs report resume=true.
+func (r *Repository) MarkToolConfirmationDecision(ctx context.Context, runID, questionID, decision, message string) (resume bool, err error) {
+	err = r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		run := new(AgentRun)
+		if err := tx.NewSelect().Model(run).Where("id = ?", runID).For("UPDATE").Scan(ctx); err != nil {
+			return fmt.Errorf("lock run for decision: %w", err)
+		}
+		sc := SuspendSignalFromMap(run.SuspendContext)
+		if sc == nil || len(sc.PendingToolConfirmations) == 0 {
+			resume = true
+			return nil
+		}
+		remaining := 0
+		for i := range sc.PendingToolConfirmations {
+			c := &sc.PendingToolConfirmations[i]
+			if c.QuestionID == questionID && c.Decision == "" {
+				c.Decision = decision
+				c.Message = message
+			}
+			if c.Decision == "" {
+				remaining++
+			}
+		}
+		resume = remaining == 0
+		if _, err := tx.NewUpdate().
+			Model((*AgentRun)(nil)).
+			Set("suspend_context = ?", sc.ToMap()).
+			Where("id = ?", runID).
+			Exec(ctx); err != nil {
+			return fmt.Errorf("update suspend_context: %w", err)
+		}
+		return nil
+	})
+	return resume, err
+}
+
 func (r *Repository) PauseRun(ctx context.Context, runID string, stepCount int) error {
 	now := time.Now()
 	_, err := r.db.NewUpdate().
@@ -1939,10 +1979,13 @@ func (r *Repository) CancelPendingQuestionsForRun(ctx context.Context, runID str
 	return err
 }
 
-// AnswerQuestion updates a question with the user's response.
-func (r *Repository) AnswerQuestion(ctx context.Context, id string, response string, respondedBy string) error {
+// AnswerQuestion atomically claims a pending question by recording the user's
+// response. Returns true when this call won the claim (the question was
+// pending), false when it was already answered/cancelled (lost a concurrent
+// claim). Callers must only resume the run when claimed is true.
+func (r *Repository) AnswerQuestion(ctx context.Context, id string, response string, respondedBy string) (bool, error) {
 	now := time.Now()
-	_, err := r.db.NewUpdate().
+	res, err := r.db.NewUpdate().
 		Model((*AgentQuestion)(nil)).
 		Set("response = ?", response).
 		Set("responded_by = ?", respondedBy).
@@ -1952,7 +1995,110 @@ func (r *Repository) AnswerQuestion(ctx context.Context, id string, response str
 		Where("id = ?", id).
 		Where("status = ?", QuestionStatusPending).
 		Exec(ctx)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// CreateToolApproval inserts a pending tool-approval audit record.
+func (r *Repository) CreateToolApproval(ctx context.Context, a *AgentToolApproval) error {
+	if a.CreatedAt.IsZero() {
+		a.CreatedAt = time.Now()
+	}
+	if a.UpdatedAt.IsZero() {
+		a.UpdatedAt = time.Now()
+	}
+	_, err := r.db.NewInsert().Model(a).Exec(ctx)
 	return err
+}
+
+// UpdateToolApprovalDecision records the human decision on a tool-approval audit
+// record, keyed by question ID. Only a pending record is updated (idempotent).
+func (r *Repository) UpdateToolApprovalDecision(ctx context.Context, questionID, decision, message, decidedBy string) error {
+	now := time.Now()
+	_, err := r.db.NewUpdate().
+		Model((*AgentToolApproval)(nil)).
+		Set("decision = ?", decision).
+		Set("message = ?", message).
+		Set("decided_by = ?", decidedBy).
+		Set("decided_at = ?", now).
+		Set("updated_at = ?", now).
+		Where("question_id = ?", questionID).
+		Where("decision = ?", "pending").
+		Exec(ctx)
+	return err
+}
+
+// CancelQuestion atomically claims a pending question by marking it cancelled.
+// Returns true when this call won the claim, false when the question was
+// already answered/cancelled. Callers must only resume the run when claimed.
+func (r *Repository) CancelQuestion(ctx context.Context, id string) (bool, error) {
+	now := time.Now()
+	res, err := r.db.NewUpdate().
+		Model((*AgentQuestion)(nil)).
+		Set("status = ?", QuestionStatusCancelled).
+		Set("updated_at = ?", now).
+		Where("id = ?", id).
+		Where("status = ?", QuestionStatusPending).
+		Exec(ctx)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// ReopenQuestion reverts a claimed question back to pending so the user can
+// retry after a resume-setup failure. Used only on the error path after a
+// successful claim, so a failed resume does not leave the run stuck paused.
+func (r *Repository) ReopenQuestion(ctx context.Context, id string) error {
+	now := time.Now()
+	_, err := r.db.NewUpdate().
+		Model((*AgentQuestion)(nil)).
+		Set("status = ?", QuestionStatusPending).
+		Set("updated_at = ?", now).
+		Where("id = ?", id).
+		Exec(ctx)
+	return err
+}
+
+// ListToolApprovals returns tool-approval audit records for a project, newest
+// first, optionally filtered by decision (pending, approved, rejected, cancelled).
+// Each record's ConversationID is resolved by joining agent_runs (on run_id)
+// then chat_conversations (on acp_session_id); it is nil for runs without a
+// chat conversation.
+func (r *Repository) ListToolApprovals(ctx context.Context, projectID string, decision *string) ([]*AgentToolApproval, error) {
+	type approvalRow struct {
+		AgentToolApproval
+		ConversationID *string `bun:"conversation_id"`
+	}
+	query := `SELECT ata.id, ata.run_id, ata.project_id, ata.agent_id, ata.question_id,
+	                 ata.tool_name, ata.args_summary, ata.decision, ata.message,
+	                 ata.decided_by, ata.decided_at, ata.created_at, ata.updated_at,
+	                 cc.id AS conversation_id
+	          FROM kb.agent_tool_approvals ata
+	          LEFT JOIN kb.agent_runs ar ON ar.id = ata.run_id
+	          LEFT JOIN kb.chat_conversations cc ON cc.acp_session_id = ar.acp_session_id
+	          WHERE ata.project_id = ?`
+	args := []any{projectID}
+	if decision != nil {
+		query += " AND ata.decision = ?"
+		args = append(args, *decision)
+	}
+	query += " ORDER BY ata.created_at DESC"
+	var rows []approvalRow
+	if err := r.db.NewRaw(query, args...).Scan(ctx, &rows); err != nil {
+		return nil, err
+	}
+	approvals := make([]*AgentToolApproval, len(rows))
+	for i := range rows {
+		a := rows[i].AgentToolApproval
+		a.ConversationID = rows[i].ConversationID
+		approvals[i] = &a
+	}
+	return approvals, nil
 }
 
 // ListQuestionsByRunID returns all questions for a run, ordered by creation time.

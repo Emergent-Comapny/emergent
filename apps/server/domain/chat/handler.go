@@ -925,6 +925,7 @@ func (h *Handler) streamAgentChat(ctx context.Context, conv *Conversation, messa
 
 	// Collect the full response text for persistence
 	var fullResponse strings.Builder
+	thinkingSeq := 0
 
 	// Build the StreamCallback that maps executor events to SSE events
 	streamCallback := func(event agents.StreamEvent) {
@@ -932,6 +933,9 @@ func (h *Handler) streamAgentChat(ctx context.Context, conv *Conversation, messa
 		case agents.StreamEventTextDelta:
 			fullResponse.WriteString(event.Text)
 			sseWriter.WriteData(sse.NewTokenEvent(event.Text))
+		case agents.StreamEventThinking:
+			thinkingSeq++
+			sseWriter.WriteData(sse.NewThinkingEvent(strconv.Itoa(thinkingSeq), event.Role, event.Text))
 		case agents.StreamEventToolCallStart:
 			sseWriter.WriteData(sse.NewMCPToolEvent(event.Tool, "started", event.Input, ""))
 		case agents.StreamEventToolCallEnd:
@@ -942,6 +946,8 @@ func (h *Handler) streamAgentChat(ctx context.Context, conv *Conversation, messa
 			sseWriter.WriteData(sse.NewMCPToolEvent(event.Tool, status, event.Output, event.Error))
 		case agents.StreamEventError:
 			sseWriter.WriteData(sse.NewErrorEvent(event.Error))
+		case agents.StreamEventToolApproval:
+			sseWriter.WriteData(sse.NewApprovalEvent(event.Tool, event.Input, event.QuestionID))
 		}
 	}
 

@@ -8,13 +8,13 @@ import (
 // validateMigrationHints validates a SchemaMigrationHints block against the schema
 // it belongs to. Returns a list of human-readable error messages; nil slice means valid.
 //
-// Rules:
+// Rules (all checked against THIS schema, i.e. the target/new version):
 //  1. from_version must be non-empty when the block is present.
-//  2. All type names in type_renames.from, property_renames.type_name, and
-//     removed_properties.type_name must exist in the schema's object or
-//     relationship type list.
-//  3. All property names in property_renames.from and removed_properties.name
-//     must exist in the referenced type's property set.
+//  2. type_renames.to, property_renames.type_name, and removed_properties.type_name
+//     must exist in the schema's object or relationship type list. `from` names
+//     reference the previous version's schema and are not validated here.
+//  3. property_renames.to must exist in the referenced type's property set.
+//     removed_properties.name is intentionally absent from this schema (no check).
 func validateMigrationHints(hints *SchemaMigrationHints, objectTypeSchemas, relTypeSchemas json.RawMessage) []string {
 	if hints == nil {
 		return nil
@@ -41,10 +41,11 @@ func validateMigrationHints(hints *SchemaMigrationHints, objectTypeSchemas, relT
 		allTypeNames[k] = true
 	}
 
-	// Rule 2 + 3: type_renames.from
+	// Rule 2: type_renames.to must exist in this (new) schema.
+	// `from` is the old name from the from_version schema, not present here.
 	for _, tr := range hints.TypeRenames {
-		if !allTypeNames[tr.From] {
-			errs = append(errs, fmt.Sprintf("migrations.type_renames: type %q does not exist in the schema", tr.From))
+		if !allTypeNames[tr.To] {
+			errs = append(errs, fmt.Sprintf("migrations.type_renames: type %q does not exist in the schema", tr.To))
 		}
 	}
 
@@ -54,23 +55,21 @@ func validateMigrationHints(hints *SchemaMigrationHints, objectTypeSchemas, relT
 			errs = append(errs, fmt.Sprintf("migrations.property_renames: type %q does not exist in the schema", pr.TypeName))
 			continue
 		}
-		// Rule 3: check property exists in the type
+		// Rule 3: check the new property name (`to`) exists in the type.
+		// `from` is the old property name from the previous version.
 		props, hasProps := objectTypeProps[pr.TypeName]
-		if hasProps && len(props) > 0 && !props[pr.From] {
-			errs = append(errs, fmt.Sprintf("migrations.property_renames: property %q does not exist in type %q", pr.From, pr.TypeName))
+		if hasProps && len(props) > 0 && !props[pr.To] {
+			errs = append(errs, fmt.Sprintf("migrations.property_renames: property %q does not exist in type %q", pr.To, pr.TypeName))
 		}
 	}
 
-	// Rule 2 + 3: removed_properties
+	// Rule 2: removed_properties.type_name must exist in this schema.
+	// `name` is the property dropped from the previous version, so it is
+	// intentionally absent from the new schema — no existence check.
 	for _, rp := range hints.RemovedProperties {
 		if !allTypeNames[rp.TypeName] {
 			errs = append(errs, fmt.Sprintf("migrations.removed_properties: type %q does not exist in the schema", rp.TypeName))
 			continue
-		}
-		// Rule 3: check property exists in the type
-		props, hasProps := objectTypeProps[rp.TypeName]
-		if hasProps && len(props) > 0 && !props[rp.Name] {
-			errs = append(errs, fmt.Sprintf("migrations.removed_properties: property %q does not exist in type %q", rp.Name, rp.TypeName))
 		}
 	}
 

@@ -56,7 +56,7 @@ type SchemaMigrationJob struct {
 	ObjectsMigrated int            `bun:"objects_migrated,notnull,default:0" json:"objects_migrated"`
 	ObjectsFailed   int            `bun:"objects_failed,notnull,default:0" json:"objects_failed"`
 	Error           *string        `bun:"error" json:"error,omitempty"`
-	AutoUninstall   bool           `bun:"-" json:"auto_uninstall,omitempty"` // runtime-only flag
+	AutoUninstall   bool           `bun:"auto_uninstall,notnull,default:false" json:"auto_uninstall,omitempty"`
 	CreatedAt       time.Time      `bun:"created_at,notnull" json:"created_at"`
 	StartedAt       *time.Time     `bun:"started_at" json:"started_at,omitempty"`
 	CompletedAt     *time.Time     `bun:"completed_at" json:"completed_at,omitempty"`
@@ -82,8 +82,30 @@ type SchemaMigrationPreviewResponse struct {
 	CanProceed     bool                  `json:"can_proceed"`
 	BlockReason    string                `json:"block_reason,omitempty"`
 	TotalObjects   int                   `json:"total_objects"`
+	Plan           *SchemaMigrationPlan  `json:"plan,omitempty"`
 	PerTypeResults []MigrationTypeResult `json:"per_type_results,omitempty"`
-	SuggestedHints string                `json:"suggested_hints_yaml,omitempty"`
+}
+
+// SchemaMigrationPlan is a structured dry-run report of what a migration will do.
+// It lets a client render an exact preview: which types are renamed/added and
+// which properties are renamed/dropped/added per type.
+type SchemaMigrationPlan struct {
+	// TypeRenames lists object/relationship type renames to apply (from hints).
+	TypeRenames []TypeRename `json:"type_renames,omitempty"`
+	// PropertyRenames lists property renames within types (from hints).
+	PropertyRenames []PropertyRename `json:"property_renames,omitempty"`
+	// RemovedProperties lists properties that are intentionally dropped (from hints).
+	RemovedProperties []RemovedProperty `json:"removed_properties,omitempty"`
+	// AddedTypes lists type names present in the target schema but not the source.
+	AddedTypes []string `json:"added_types,omitempty"`
+	// AddedProperties lists properties added to existing types (target prop not in source).
+	AddedProperties []AddedProperty `json:"added_properties,omitempty"`
+}
+
+// AddedProperty identifies a property added to a type in a migration.
+type AddedProperty struct {
+	TypeName string `json:"type_name"`
+	Name     string `json:"name"`
 }
 
 // MigrationTypeResult summarises migration risk for a single type.
@@ -93,6 +115,14 @@ type MigrationTypeResult struct {
 	RiskLevel   string `json:"risk_level"`
 	CanProceed  bool   `json:"can_proceed"`
 	BlockReason string `json:"block_reason,omitempty"`
+	// MigratedProps lists props carried over unchanged (union across objects, deduped).
+	MigratedProps []string `json:"migrated_props,omitempty"`
+	// DroppedProps lists props present in the old schema but absent from the new one.
+	DroppedProps []string `json:"dropped_props,omitempty"`
+	// AddedProps lists props present in the new schema but absent from existing objects.
+	AddedProps []string `json:"added_props,omitempty"`
+	// CoercedProps lists props whose values need type coercion.
+	CoercedProps []string `json:"coerced_props,omitempty"`
 }
 
 // SchemaMigrationExecuteRequest is the request to execute a migration.
@@ -183,8 +213,12 @@ type ProjectMemorySchema struct {
 	Active      bool       `bun:"active,notnull,default:true" json:"active"`
 	InstalledAt time.Time  `bun:"installed_at" json:"installedAt"`
 	RemovedAt   *time.Time `bun:"removed_at" json:"removedAt,omitempty"`
-	CreatedAt   time.Time  `bun:"created_at" json:"createdAt"`
-	UpdatedAt   time.Time  `bun:"updated_at" json:"updatedAt"`
+	// SourceBlueprintID records the blueprint that created this assignment
+	// (NULL = assigned outside any blueprint). Unapply uses it to avoid removing
+	// manually-installed or shared pack assignments.
+	SourceBlueprintID *string   `bun:"source_blueprint_id,type:uuid" json:"sourceBlueprintId,omitempty"`
+	CreatedAt         time.Time `bun:"created_at" json:"createdAt"`
+	UpdatedAt         time.Time `bun:"updated_at" json:"updatedAt"`
 
 	// Joined memory schema
 	MemorySchema *GraphMemorySchema `bun:"rel:belongs-to,join:schema_id=id" json:"memorySchema,omitempty"`
@@ -259,6 +293,10 @@ type AssignPackRequest struct {
 	// AutoUninstall, when true, uninstalls the from_version schema after a
 	// successful auto-migration.
 	AutoUninstall bool `json:"auto_uninstall,omitempty"`
+	// SourceBlueprintID, when set, records the blueprint that owns this
+	// assignment. Used by blueprint unapply to avoid removing shared/manual
+	// assignments. Nil for manual assigns.
+	SourceBlueprintID *string `json:"sourceBlueprintId,omitempty"`
 }
 
 // PropertyConflict describes a single property-level conflict during a merge.
