@@ -67,8 +67,18 @@ func (s *Service) AssignPack(ctx context.Context, projectID, userID string, req 
 
 	// Get the full schema to check for migration hints
 	pack, packErr := s.repo.GetPackByID(ctx, req.SchemaID)
-	if packErr != nil || pack == nil || pack.Migrations == nil {
-		// No migration hints — return result as-is
+	if packErr != nil || pack == nil {
+		return result, nil
+	}
+	if pack.Migrations == nil {
+		// No migration hints — no data transform needed, so a newer version can
+		// safely supersede older active versions of the same pack immediately.
+		// Without this, a version bump with no migrations leaves every older
+		// version active and their types duplicated in the compiled view.
+		if supErr := s.repo.SupersedeAssignments(ctx, projectID, pack.Name, pack.ID); supErr != nil {
+			s.log.Warn("failed to supersede older schema versions",
+				slog.String("schemaName", pack.Name), logger.Error(supErr))
+		}
 		return result, nil
 	}
 
@@ -648,7 +658,17 @@ func (s *Service) ExecuteSchemaMigration(ctx context.Context, projectID string, 
 	}
 
 	db := s.repo.DB()
+	// toVersion is used for the migration archive's to_version key (self-
+	// consistent with rollback). schemaVersion is the pack's human version
+	// string (e.g. "2.0.0"), which the drift scan compares against — stamping
+	// the UUID here would leave objects flagged stale forever.
 	toVersion := req.ToSchemaID
+	schemaVersion := req.ToSchemaID
+	if req.ToSchemaID != "" {
+		if toSchema, schErr := s.repo.GetPackByID(ctx, req.ToSchemaID); schErr == nil && toSchema != nil && toSchema.Version != "" {
+			schemaVersion = toSchema.Version
+		}
+	}
 	maxObjs := req.MaxObjects
 
 	for typeName, toSchema := range toObjSchemas {
@@ -689,7 +709,7 @@ func (s *Service) ExecuteSchemaMigration(ctx context.Context, projectID string, 
 				    migration_archive = ?,
 				    updated_at = NOW()
 				WHERE id = ? AND project_id = ?
-			`, result.NewProperties, toVersion, string(archiveJSON), obj.ID, projectID).Exec(ctx)
+			`, result.NewProperties, schemaVersion, string(archiveJSON), obj.ID, projectID).Exec(ctx)
 			if patchErr != nil {
 				s.log.Warn("failed to patch object after migration",
 					slog.String("objectId", obj.ID.String()),
@@ -711,6 +731,27 @@ func (s *Service) ExecuteSchemaMigration(ctx context.Context, projectID string, 
 	`, projectID, req.FromSchemaID, req.ToSchemaID, resp.ObjectsMigrated, resp.ObjectsFailed, now).Exec(ctx)
 
 	return resp, nil
+}
+
+// SupersedeFromVersion soft-deletes the from_schema assignment after a
+// successful manual migration, but only when it is a same-pack version upgrade
+// (from.Name == to.Name). A different-pack migration must not remove the other
+// pack. No-op on any error — supersede is best-effort cleanup.
+func (s *Service) SupersedeFromVersion(ctx context.Context, projectID, fromSchemaID, toSchemaID string) {
+	from, err := s.repo.GetPackByID(ctx, fromSchemaID)
+	if err != nil || from == nil {
+		return
+	}
+	to, err := s.repo.GetPackByID(ctx, toSchemaID)
+	if err != nil || to == nil || to.Name != from.Name {
+		return
+	}
+	// Keep `to` (the new version) active; supersede every other same-name
+	// version, including `from`.
+	if supErr := s.repo.SupersedeAssignments(ctx, projectID, to.Name, to.ID); supErr != nil {
+		s.log.Warn("failed to supersede older version after migration",
+			slog.String("schemaName", to.Name), logger.Error(supErr))
+	}
 }
 
 // RollbackSchemaMigration restores property data from migration_archive for

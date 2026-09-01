@@ -175,24 +175,24 @@ func (w *SchemaMigrationJobWorker) executeJob(ctx context.Context, jobID, projec
 	} else {
 		job.Status = "completed"
 
-		// Task 7.5: Auto-uninstall from_version schema if requested
+		// Task 7.5: Auto-uninstall superseded versions if requested
 		if job.AutoUninstall && len(job.Chain) > 0 {
 			fromSchemaID := job.Chain[0].FromSchemaID
 			fromSchema, fetchErr := w.svc.repo.GetPackByID(ctx, fromSchemaID)
+			// The version that remains active after migration is the chain's
+			// final target, not the from-version.
+			finalToID := job.Chain[len(job.Chain)-1].ToSchemaID
 			if fetchErr == nil && fromSchema != nil {
-				// Find and remove the project assignment for the from schema
-				w.log.Info("auto-uninstalling from_schema after migration",
+				// Supersede every other active version of this pack (the from
+				// version and any intermediates), keeping only the final target.
+				w.log.Info("auto-uninstalling superseded versions after migration",
 					slog.String("fromSchemaId", fromSchemaID),
+					slog.String("toSchemaId", finalToID),
 					slog.String("projectId", projectID))
-				// Soft-delete any active assignment for the from schema
-				if _, delErr := w.svc.repo.DB().NewRaw(`
-					UPDATE kb.project_schemas
-					SET removed_at = NOW(), updated_at = NOW()
-					WHERE project_id = ? AND schema_id = ? AND removed_at IS NULL
-				`, projectID, fromSchemaID).Exec(ctx); delErr != nil {
-					w.log.Warn("failed to auto-uninstall from_schema",
+				if supErr := w.svc.repo.SupersedeAssignments(ctx, projectID, fromSchema.Name, finalToID); supErr != nil {
+					w.log.Warn("failed to auto-uninstall superseded versions",
 						slog.String("fromSchemaId", fromSchemaID),
-						logger.Error(delErr))
+						logger.Error(supErr))
 				}
 			}
 		}

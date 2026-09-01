@@ -1181,6 +1181,27 @@ func (r *Repository) GetPackByNameVersion(ctx context.Context, name, version str
 	return &pack, nil
 }
 
+// SupersedeAssignments soft-deletes every other active assignment of the same
+// pack name in the project, leaving only currentSchemaID active. Called when a
+// newer version of a pack is installed (or a no-migration version bump) so the
+// compiled schema view does not keep duplicated types from older versions.
+// Mirror of blueprints.SupersedeApplications, at the schema-assignment level.
+func (r *Repository) SupersedeAssignments(ctx context.Context, projectID, schemaName, currentSchemaID string) error {
+	_, err := r.db.NewRaw(`
+		UPDATE kb.project_schemas
+		SET removed_at = NOW(), updated_at = NOW()
+		WHERE project_id = ?
+		  AND schema_id <> ?
+		  AND removed_at IS NULL
+		  AND schema_id IN (SELECT id FROM kb.graph_schemas WHERE name = ?)
+	`, projectID, currentSchemaID, schemaName).Exec(ctx)
+	if err != nil {
+		r.log.Error("failed to supersede schema assignments", logger.Error(err))
+		return apperror.ErrDatabase.WithInternal(err)
+	}
+	return nil
+}
+
 // GetInstalledSchemasByName returns all active installed schema records for a
 // project that match the given schema name (across all versions).
 // Task 4.3.

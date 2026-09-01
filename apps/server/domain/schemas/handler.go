@@ -594,6 +594,12 @@ func (h *Handler) ExecuteMigration(c echo.Context) error {
 		return err
 	}
 
+	// Best-effort cleanup: a successful same-pack migration supersedes the
+	// from-version assignment so the compiled view does not keep its types.
+	if result.ObjectsFailed == 0 {
+		h.svc.SupersedeFromVersion(c.Request().Context(), projectID, req.FromSchemaID, req.ToSchemaID)
+	}
+
 	return c.JSON(http.StatusOK, result)
 }
 
