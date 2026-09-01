@@ -851,7 +851,7 @@ func (ae *AgentExecutor) Resume(ctx context.Context, priorRun *AgentRun, req Exe
 			ctx = auth.ContextWithProjectID(ctx, req.ProjectID)
 		}
 		rootRunID := ae.getRootRunID(ctx, newRun)
-		if injErr := ae.injectToolResponse(ctx, rootRunID, req.ProjectID, sc, &req); injErr != nil {
+		if injErr := ae.injectToolResponse(ctx, rootRunID, newRun.ID, req.ProjectID, sc, &req); injErr != nil {
 			ae.log.Warn("failed to inject FunctionResponse into ADK session, falling back to text injection",
 				slog.String("run_id", newRun.ID),
 				slog.String("pending_tool_call_id", sc.PendingToolCallID),
@@ -900,7 +900,7 @@ func (ae *AgentExecutor) Resume(ctx context.Context, priorRun *AgentRun, req Exe
 // on resume, the LLM sees a proper tool call/response pair instead of a synthetic
 // text message. The session is identified by rootRunID (the original non-resumed run ID).
 // req is a pointer so that callers can inspect any mutations made during injection.
-func (ae *AgentExecutor) injectToolResponse(ctx context.Context, rootRunID, projectID string, sc *SuspendSignal, req *ExecuteRequest) error {
+func (ae *AgentExecutor) injectToolResponse(ctx context.Context, rootRunID, runID, projectID string, sc *SuspendSignal, req *ExecuteRequest) error {
 	sessionID := rootRunID // matches getRootRunID result used in runPipeline
 
 	getResp, err := ae.sessionService.Get(ctx, &session.GetRequest{
@@ -972,6 +972,32 @@ func (ae *AgentExecutor) injectToolResponse(ctx context.Context, rootRunID, proj
 				slog.Any("args", sc.PendingToolConfirmArgs),
 				slog.Any("result", responseBody),
 			)
+
+			// Persist the real result so the conversation timeline (and the
+			// gateway's session dump) shows what the approved tool returned.
+			// Without this, an intercepted call is recorded only with the
+			// "awaiting_confirmation" sentinel on the prior run, and the actual
+			// output — injected into the ADK session only — is invisible to
+			// history/readers of kb.agent_run_tool_calls.
+			status := "completed"
+			if callErr != nil {
+				status = "failed"
+			}
+			tcRecord := &AgentRunToolCall{
+				RunID:      runID,
+				ToolName:   sc.PendingToolName,
+				Input:      sc.PendingToolConfirmArgs,
+				Output:     responseBody,
+				Status:     status,
+				StepNumber: 0,
+			}
+			if persistErr := ae.repo.CreateToolCall(ctx, tcRecord); persistErr != nil {
+				ae.log.Warn("failed to persist approved tool result",
+					slog.String("run_id", runID),
+					slog.String("tool", sc.PendingToolName),
+					slog.String("error", persistErr.Error()),
+				)
+			}
 		} else {
 			reason := req.UserMessage
 			if reason == "" {
