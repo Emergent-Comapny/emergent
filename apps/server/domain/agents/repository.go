@@ -2066,16 +2066,37 @@ func (r *Repository) ReopenQuestion(ctx context.Context, id string) error {
 
 // ListToolApprovals returns tool-approval audit records for a project, newest
 // first, optionally filtered by decision (pending, approved, rejected, cancelled).
+// Each record's ConversationID is resolved by joining agent_runs (on run_id)
+// then chat_conversations (on acp_session_id); it is nil for runs without a
+// chat conversation.
 func (r *Repository) ListToolApprovals(ctx context.Context, projectID string, decision *string) ([]*AgentToolApproval, error) {
-	var approvals []*AgentToolApproval
-	q := r.db.NewSelect().
-		Model(&approvals).
-		Where("project_id = ?", projectID)
-	if decision != nil {
-		q = q.Where("decision = ?", *decision)
+	type approvalRow struct {
+		AgentToolApproval
+		ConversationID *string `bun:"conversation_id"`
 	}
-	if err := q.Order("created_at DESC").Scan(ctx); err != nil {
+	query := `SELECT ata.id, ata.run_id, ata.project_id, ata.agent_id, ata.question_id,
+	                 ata.tool_name, ata.args_summary, ata.decision, ata.message,
+	                 ata.decided_by, ata.decided_at, ata.created_at, ata.updated_at,
+	                 cc.id AS conversation_id
+	          FROM kb.agent_tool_approvals ata
+	          LEFT JOIN kb.agent_runs ar ON ar.id = ata.run_id
+	          LEFT JOIN kb.chat_conversations cc ON cc.acp_session_id = ar.acp_session_id
+	          WHERE ata.project_id = ?`
+	args := []any{projectID}
+	if decision != nil {
+		query += " AND ata.decision = ?"
+		args = append(args, *decision)
+	}
+	query += " ORDER BY ata.created_at DESC"
+	var rows []approvalRow
+	if err := r.db.NewRaw(query, args...).Scan(ctx, &rows); err != nil {
 		return nil, err
+	}
+	approvals := make([]*AgentToolApproval, len(rows))
+	for i := range rows {
+		a := rows[i].AgentToolApproval
+		a.ConversationID = rows[i].ConversationID
+		approvals[i] = &a
 	}
 	return approvals, nil
 }

@@ -511,6 +511,11 @@ type AgentToolApproval struct {
 	DecidedAt   *time.Time     `bun:"decided_at" json:"decidedAt,omitempty"`
 	CreatedAt   time.Time      `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"createdAt"`
 	UpdatedAt   time.Time      `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updatedAt"`
+
+	// ConversationID is the chat conversation this approval's run belongs to,
+	// resolved via agent_runs.acp_session_id → chat_conversations.id. Populated
+	// only by ListToolApprovals (not a stored column).
+	ConversationID *string `bun:"-" json:"conversationId,omitempty"`
 }
 
 // AgentJobStatus defines the status of an agent run job in the dispatch queue.
