@@ -917,7 +917,7 @@ func (ae *AgentExecutor) Resume(ctx context.Context, priorRun *AgentRun, req Exe
 			ctx = auth.ContextWithProjectID(ctx, req.ProjectID)
 		}
 		rootRunID := ae.getRootRunID(ctx, newRun)
-		if injErr := ae.injectToolResponse(ctx, rootRunID, req.ProjectID, sc, &req); injErr != nil {
+		if injErr := ae.injectToolResponse(ctx, rootRunID, newRun.ID, req.ProjectID, sc, &req); injErr != nil {
 			ae.log.Warn("failed to inject FunctionResponse into ADK session, falling back to text injection",
 				slog.String("run_id", newRun.ID),
 				slog.String("pending_tool_call_id", sc.PendingToolCallID),
@@ -966,7 +966,7 @@ func (ae *AgentExecutor) Resume(ctx context.Context, priorRun *AgentRun, req Exe
 // on resume, the LLM sees a proper tool call/response pair instead of a synthetic
 // text message. The session is identified by rootRunID (the original non-resumed run ID).
 // req is a pointer so that callers can inspect any mutations made during injection.
-func (ae *AgentExecutor) injectToolResponse(ctx context.Context, rootRunID, projectID string, sc *SuspendSignal, req *ExecuteRequest) error {
+func (ae *AgentExecutor) injectToolResponse(ctx context.Context, rootRunID, runID, projectID string, sc *SuspendSignal, req *ExecuteRequest) error {
 	sessionID := rootRunID // matches getRootRunID result used in runPipeline
 
 	getResp, err := ae.sessionService.Get(ctx, &session.GetRequest{
@@ -990,7 +990,7 @@ func (ae *AgentExecutor) injectToolResponse(ctx context.Context, rootRunID, proj
 					FunctionResponse: &genai.FunctionResponse{
 						ID:       c.FunctionCallID,
 						Name:     c.ToolName,
-						Response: ae.confirmResponseBody(ctx, projectID, c.Decision, c.Message, c.ToolName, c.ToolArgs),
+						Response: ae.confirmResponseBody(ctx, runID, projectID, c.Decision, c.Message, c.ToolName, c.ToolArgs),
 					},
 				})
 			}
@@ -1000,7 +1000,7 @@ func (ae *AgentExecutor) injectToolResponse(ctx context.Context, rootRunID, proj
 				FunctionResponse: &genai.FunctionResponse{
 					ID:       sc.PendingToolCallID,
 					Name:     orDefaultToolName(sc.PendingToolName),
-					Response: ae.confirmResponseBody(ctx, projectID, req.UserMessage, req.RejectMessage, sc.PendingToolName, sc.PendingToolConfirmArgs),
+					Response: ae.confirmResponseBody(ctx, runID, projectID, req.UserMessage, req.RejectMessage, sc.PendingToolName, sc.PendingToolConfirmArgs),
 				},
 			})
 		}
@@ -1092,20 +1092,44 @@ func (ae *AgentExecutor) injectToolResponse(ctx context.Context, rootRunID, proj
 
 // confirmResponseBody builds the FunctionResponse body for a single tool-policy
 // confirmation decision: approve executes the tool, cancel is "not_taken", and
-// anything else is a structured rejection (optionally with a reason).
-func (ae *AgentExecutor) confirmResponseBody(ctx context.Context, projectID, decision, message, toolName string, toolArgs map[string]any) map[string]any {
+// anything else is a structured rejection (optionally with a reason). On approve
+// the executed result is also persisted to run history so the conversation
+// timeline shows the real tool output rather than only the "awaiting_confirmation"
+// sentinel on the prior run.
+func (ae *AgentExecutor) confirmResponseBody(ctx context.Context, runID, projectID, decision, message, toolName string, toolArgs map[string]any) map[string]any {
 	responseBody := map[string]any{}
 	switch strings.TrimSpace(strings.ToLower(decision)) {
 	case "approve":
 		toolResult, callErr := ae.toolPool.CallTool(ctx, projectID, toolName, toolArgs)
+		status := "completed"
 		if callErr != nil {
 			responseBody["error"] = fmt.Sprintf("tool execution failed: %v", callErr)
+			status = "failed"
 		} else {
 			for k, v := range toolResult {
 				responseBody[k] = v
 			}
 			if len(responseBody) == 0 {
 				responseBody["status"] = "ok"
+			}
+		}
+		// Persist the real result so the conversation timeline (and the gateway's
+		// session dump) shows what the approved tool returned.
+		if runID != "" {
+			tcRecord := &AgentRunToolCall{
+				RunID:      runID,
+				ToolName:   toolName,
+				Input:      toolArgs,
+				Output:     responseBody,
+				Status:     status,
+				StepNumber: 0,
+			}
+			if persistErr := ae.repo.CreateToolCall(ctx, tcRecord); persistErr != nil {
+				ae.log.Warn("failed to persist approved tool result",
+					slog.String("run_id", runID),
+					slog.String("tool", toolName),
+					slog.String("error", persistErr.Error()),
+				)
 			}
 		}
 	case "cancel":

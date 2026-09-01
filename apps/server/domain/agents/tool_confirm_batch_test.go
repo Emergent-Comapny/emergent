@@ -81,7 +81,7 @@ func TestToolConfirmPauseStateConcurrentAdd(t *testing.T) {
 
 func TestConfirmResponseBodyReject(t *testing.T) {
 	ae := &AgentExecutor{}
-	body := ae.confirmResponseBody(context.Background(), "p", "reject", "too long", "tool", nil)
+	body := ae.confirmResponseBody(context.Background(), "", "p", "reject", "too long", "tool", nil)
 	assert.Equal(t, "rejected", body["policy_decision"])
 	assert.Equal(t, "rejected", body["status"])
 	assert.Equal(t, "too long", body["reason"])
@@ -89,14 +89,14 @@ func TestConfirmResponseBodyReject(t *testing.T) {
 
 func TestConfirmResponseBodyCancel(t *testing.T) {
 	ae := &AgentExecutor{}
-	body := ae.confirmResponseBody(context.Background(), "p", "cancel", "", "tool", nil)
+	body := ae.confirmResponseBody(context.Background(), "", "p", "cancel", "", "tool", nil)
 	assert.Equal(t, "cancelled", body["policy_decision"])
 	assert.Equal(t, "not_taken", body["status"])
 }
 
 func TestConfirmResponseBodyDefaultRejects(t *testing.T) {
 	ae := &AgentExecutor{}
-	body := ae.confirmResponseBody(context.Background(), "p", "whatever", "", "tool", nil)
+	body := ae.confirmResponseBody(context.Background(), "", "p", "whatever", "", "tool", nil)
 	assert.Equal(t, "rejected", body["policy_decision"])
 	assert.Equal(t, "rejected", body["status"])
 	_, hasReason := body["reason"]
