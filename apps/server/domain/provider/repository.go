@@ -368,6 +368,25 @@ func (r *Repository) GetPricingByModel(ctx context.Context, model string) (*Prov
 	return &pricing, nil
 }
 
+// ListPricing returns all global retail pricing rows, ordered by provider then
+// model. Returns an empty (non-nil) slice when no rows exist.
+func (r *Repository) ListPricing(ctx context.Context) ([]ProviderPricing, error) {
+	var rows []ProviderPricing
+	err := r.db.NewSelect().
+		Model(&rows).
+		OrderExpr("provider ASC, model ASC").
+		Scan(ctx)
+
+	if err != nil {
+		r.log.Error("failed to list pricing", logger.Error(err))
+		return nil, apperror.ErrDatabase.WithInternal(err)
+	}
+	if rows == nil {
+		rows = []ProviderPricing{}
+	}
+	return rows, nil
+}
+
 // UpsertPricing bulk upserts global pricing entries.
 func (r *Repository) UpsertPricing(ctx context.Context, entries []ProviderPricing) error {
 	if len(entries) == 0 {

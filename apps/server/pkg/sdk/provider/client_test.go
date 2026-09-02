@@ -249,3 +249,62 @@ func encodeJSON(w http.ResponseWriter, v any) error {
 	w.Header().Set("Content-Type", "application/json")
 	return json.NewEncoder(w).Encode(v)
 }
+
+func fixtureProviderPricing() provider.ProviderPricing {
+	return provider.ProviderPricing{
+		ID:             "price_test123",
+		Provider:       provider.ProviderDeepSeek,
+		Model:          "deepseek-v4-pro",
+		TextInputPrice: 1.74,
+		OutputPrice:    3.48,
+		LastSynced:     time.Now(),
+	}
+}
+
+func TestListPricing(t *testing.T) {
+	mock := testutil.NewMockServer(t)
+	defer mock.Close()
+
+	fixture := []provider.ProviderPricing{fixtureProviderPricing()}
+	mock.OnJSON("GET", "/api/v1/pricing", http.StatusOK, fixture)
+
+	c := newClient(t, mock)
+	result, err := c.Provider.ListPricing(context.Background())
+	if err != nil {
+		t.Fatalf("ListPricing() error = %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 pricing row, got %d", len(result))
+	}
+	if result[0].Provider != fixture[0].Provider {
+		t.Errorf("expected provider %q, got %q", fixture[0].Provider, result[0].Provider)
+	}
+	if result[0].Model != fixture[0].Model {
+		t.Errorf("expected model %q, got %q", fixture[0].Model, result[0].Model)
+	}
+	if result[0].TextInputPrice != fixture[0].TextInputPrice {
+		t.Errorf("expected text input price %v, got %v", fixture[0].TextInputPrice, result[0].TextInputPrice)
+	}
+	if result[0].OutputPrice != fixture[0].OutputPrice {
+		t.Errorf("expected output price %v, got %v", fixture[0].OutputPrice, result[0].OutputPrice)
+	}
+}
+
+func TestListPricing_Empty(t *testing.T) {
+	mock := testutil.NewMockServer(t)
+	defer mock.Close()
+
+	mock.OnJSON("GET", "/api/v1/pricing", http.StatusOK, []provider.ProviderPricing{})
+
+	c := newClient(t, mock)
+	result, err := c.Provider.ListPricing(context.Background())
+	if err != nil {
+		t.Fatalf("ListPricing() error = %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected empty (non-nil) slice from ListPricing")
+	}
+	if len(result) != 0 {
+		t.Fatalf("expected 0 pricing rows, got %d", len(result))
+	}
+}

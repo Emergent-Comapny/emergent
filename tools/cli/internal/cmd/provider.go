@@ -816,20 +816,20 @@ func resolveProviderOrgID(c *client.Client, explicit string) (string, error) {
 
 var providerPricingCmd = &cobra.Command{
 	Use:   "pricing",
-	Short: "Manage project-level pricing overrides",
-	Long: `Manage project-level manual pricing overrides for LLM cost estimation.
+	Short: "Manage LLM pricing and project overrides",
+	Long: `Show global retail pricing and manage project-level manual pricing overrides.
 
-Prices are in USD per 1 million tokens and only affect cost estimates for the
-given project (they override global retail pricing for that project).
+Global retail prices are synced from the provider registry and drive default LLM
+cost estimation. Manual overrides are in USD per 1 million tokens and only
+affect cost estimates for the given project (they override global retail).
 
 Subcommands:
-  list     List pricing overrides for a project
+  list     List global retail pricing, or a project's overrides with --project
   set      Create or update a pricing override for a project
   delete   Remove a pricing override from a project
 
-The project is read from --project or the MEMORY_PROJECT_ID environment variable.
-
 Examples:
+  memory provider pricing list
   memory provider pricing list --project <id>
   memory provider pricing set --project <id> --provider deepseek --model deepseek-v4-pro --output 3.50
   memory provider pricing delete --project <id> --provider deepseek --model deepseek-v4-pro`,
@@ -837,15 +837,19 @@ Examples:
 
 var providerPricingListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List pricing overrides for a project",
-	Long: `List all pricing overrides for a project.
+	Short: "List retail pricing (or a project's overrides with --project)",
+	Long: `List global retail pricing for every provider + model.
 
-Output is a table with columns: PROVIDER, MODEL, TEXT IN, IMAGE, VIDEO, AUDIO,
-OUTPUT, and UPDATED.
+With --project (or MEMORY_PROJECT_ID set), list that project's manual pricing
+overrides instead.
+
+Retail output is a table with columns: PROVIDER, MODEL, TEXT IN, IMAGE, VIDEO,
+AUDIO, OUTPUT, and LAST SYNCED. Override output replaces LAST SYNCED with UPDATED.
 
 Examples:
+  memory provider pricing list
   memory provider pricing list --project <id>
-  memory provider pricing list --project <id> --json`,
+  memory provider pricing list --json`,
 	RunE: runProviderPricingList,
 }
 
@@ -904,12 +908,51 @@ func runProviderPricingList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	projectID, err := resolvePricingProjectID()
-	if err != nil {
-		return err
+	ctx := context.Background()
+
+	// Without a project context, list the global retail pricing table (read-only
+	// sync data). With --project (or MEMORY_PROJECT_ID) list that project's
+	// manual pricing overrides.
+	projectID := pricingProjectID
+	if projectID == "" {
+		projectID = os.Getenv("MEMORY_PROJECT_ID")
+	}
+	if projectID == "" {
+		rows, err := c.SDK.Provider.ListPricing(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to list retail pricing: %w", err)
+		}
+
+		if pricingJSONFlag || output == "json" {
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			enc.SetIndent("", "  ")
+			return enc.Encode(rows)
+		}
+
+		if len(rows) == 0 {
+			fmt.Println("No retail pricing rows synced.")
+			return nil
+		}
+
+		t := internalui.NewTable(internalui.TableConfig{Compact: true})
+		t.SetHeaders([]string{"PROVIDER", "MODEL", "TEXT IN", "IMAGE", "VIDEO", "AUDIO", "OUTPUT", "LAST SYNCED"})
+		for _, r := range rows {
+			t.AddRow([]string{
+				r.Provider,
+				r.Model,
+				fmt.Sprintf("$%.6f", r.TextInputPrice),
+				fmt.Sprintf("$%.6f", r.ImageInputPrice),
+				fmt.Sprintf("$%.6f", r.VideoInputPrice),
+				fmt.Sprintf("$%.6f", r.AudioInputPrice),
+				fmt.Sprintf("$%.6f", r.OutputPrice),
+				fmtTime(r.LastSynced),
+			})
+		}
+		fmt.Print(t.Render())
+		return nil
 	}
 
-	overrides, err := c.SDK.Provider.ListProjectPricingOverrides(context.Background(), projectID)
+	overrides, err := c.SDK.Provider.ListProjectPricingOverrides(ctx, projectID)
 	if err != nil {
 		return fmt.Errorf("failed to list pricing overrides: %w", err)
 	}
