@@ -202,6 +202,21 @@ func (h *Handler) ListAllModels(c echo.Context) error {
 	return c.JSON(http.StatusOK, models)
 }
 
+// ListPricing returns all global retail pricing rows (per provider and model,
+// per-modality USD prices per 1M tokens). Read-only; pricing is managed by the
+// internal sync.
+// @Summary List global retail pricing
+// @Success 200 {array} ProviderPricing
+// @Failure 401 {object} apperror.Error
+// @Router /pricing [get]
+func (h *Handler) ListPricing(c echo.Context) error {
+	rows, err := h.repo.ListPricing(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, rows)
+}
+
 // --- Usage & Cost Summary ---
 
 // GetProjectUsageSummary returns aggregated token usage and estimated costs for a project.

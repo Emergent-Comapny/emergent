@@ -430,6 +430,29 @@ func (c *Client) DeleteProjectPricingOverride(ctx context.Context, projectID, pr
 		nil, nil)
 }
 
+// --- Global Retail Pricing Methods ---
+
+// ProviderPricing is a global retail pricing row for a provider + model.
+// Prices are in USD per 1 million tokens.
+type ProviderPricing struct {
+	ID              string    `json:"id"`
+	Provider        string    `json:"provider"`
+	Model           string    `json:"model"`
+	TextInputPrice  float64   `json:"textInputPrice"`
+	ImageInputPrice float64   `json:"imageInputPrice"`
+	VideoInputPrice float64   `json:"videoInputPrice"`
+	AudioInputPrice float64   `json:"audioInputPrice"`
+	OutputPrice     float64   `json:"outputPrice"`
+	LastSynced      time.Time `json:"lastSynced"`
+}
+
+// ListPricing returns all global retail pricing rows.
+func (c *Client) ListPricing(ctx context.Context) ([]ProviderPricing, error) {
+	var result []ProviderPricing
+	err := c.doJSON(ctx, "GET", "/api/v1/pricing", nil, &result)
+	return result, err
+}
+
 // --- Internal helpers ---
 
 func (c *Client) doJSON(ctx context.Context, method, path string, bodyIn, bodyOut any) error {

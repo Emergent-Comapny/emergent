@@ -23,6 +23,7 @@ import (
 //	GET    /api/v1/projects/:projectId/pricing-overrides      — list project pricing overrides
 //	PUT    /api/v1/projects/:projectId/pricing-overrides      — upsert a project pricing override
 //	DELETE /api/v1/projects/:projectId/pricing-overrides/:provider/:model — delete a project pricing override
+//	GET    /api/v1/pricing                                    — list global retail pricing (read-only)
 func RegisterRoutes(e *echo.Echo, h *Handler, authMiddleware *auth.Middleware) {
 	api := e.Group("/api/v1")
 	api.Use(authMiddleware.RequireAuth())
@@ -64,6 +65,9 @@ func RegisterRoutes(e *echo.Echo, h *Handler, authMiddleware *auth.Middleware) {
 	globalModels.Use(authMiddleware.RequireAuth())
 	globalModels.Use(authMiddleware.RequireAPITokenScopes("agents:read"))
 	globalModels.GET("", h.ListAllModels)
+
+	// Global retail pricing (read-only)
+	api.GET("/pricing", h.ListPricing)
 
 	// Live provider credential test
 	api.POST("/providers/:provider/test", h.TestProvider)
