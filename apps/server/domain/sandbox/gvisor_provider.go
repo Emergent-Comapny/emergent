@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	defaultWorkspaceImage = "memory-workspace:latest"
+	defaultWorkspaceImage = "ghcr.io/emergent-company/memory-workspace:latest"
 	gvisorRuntime         = "runsc"
 	defaultRuntimeLabel   = "memory.workspace"
 	workspaceDir          = "/workspace"
@@ -48,7 +48,7 @@ type GVisorProviderConfig struct {
 	// Leave empty to use the default Docker bridge network.
 	NetworkName string
 	// DefaultImage overrides the default workspace base image.
-	// When empty, falls back to the package constant (memory-workspace:latest).
+	// When empty, falls back to the package constant (ghcr.io/emergent-company/memory-workspace:latest).
 	DefaultImage string
 }
 
