@@ -95,30 +95,41 @@ func (h *Handler) getWorkspaceInfo(ctx context.Context, runID string) *RunWorksp
 	}
 }
 
-// getTokenUsage returns token usage for a run, falling back to trace-based
-// aggregation when no llm_usage_events exist but the run has a trace ID.
+// enrichRunTrace populates a run DTO's TokenUsage and Spans. Token usage is
+// resolved from llm_usage_events (DB) when present, falling back to
+// trace-based aggregation when no events exist but the run has a trace ID.
 // When the trace fallback is used and a model name is found, cost is computed
-// from the pricing table.
-func (h *Handler) getTokenUsage(ctx context.Context, runID string, traceID *string) *RunTokenUsage {
-	if usage, err := h.repo.GetRunTokenUsage(ctx, runID); err == nil && usage != nil {
-		return usage
+// from the pricing table. The flattened trace spans are attached from the same
+// single Tempo fetch so project-scoped clients can read spans without admin
+// access to Tempo. Both fields stay nil (omitted) when tracing is disabled or
+// Tempo is unreachable.
+func (h *Handler) enrichRunTrace(ctx context.Context, dto *AgentRunDTO, runID string, traceID *string) {
+	usage, err := h.repo.GetRunTokenUsage(ctx, runID)
+	if err != nil {
+		usage = nil
 	}
-	// Fallback: aggregate from Tempo trace spans.
-	if traceID != nil && *traceID != "" {
-		if usage, _ := GetTokenUsageFromTrace(ctx, h.tempoBaseURL, *traceID); usage != nil {
-			// Compute cost from pricing table when model is known.
-			if usage.Model != "" && h.pricing != nil {
-				if prov, textIn, out, ok := h.pricing.lookupModelPricing(ctx, usage.Model); ok {
-					const perMillion = 1_000_000.0
-					usage.Provider = prov
-					usage.EstimatedCostUSD = float64(usage.TotalInputTokens)*textIn/perMillion +
-						float64(usage.TotalOutputTokens)*out/perMillion
+
+	// Trace fetch only happens when tracing is enabled AND the run has a trace.
+	if traceID != nil && *traceID != "" && h.tempoBaseURL != "" {
+		if spans, traceUsage, _ := GetTraceSpans(ctx, h.tempoBaseURL, *traceID); spans != nil {
+			dto.Spans = spans
+			// Trace usage is only a fallback when no DB usage events exist.
+			if usage == nil && traceUsage != nil {
+				usage = traceUsage
+				// Compute cost from pricing table when model is known.
+				if usage.Model != "" && h.pricing != nil {
+					if prov, textIn, out, ok := h.pricing.lookupModelPricing(ctx, usage.Model); ok {
+						const perMillion = 1_000_000.0
+						usage.Provider = prov
+						usage.EstimatedCostUSD = float64(usage.TotalInputTokens)*textIn/perMillion +
+							float64(usage.TotalOutputTokens)*out/perMillion
+					}
 				}
 			}
-			return usage
 		}
 	}
-	return nil
+
+	dto.TokenUsage = usage
 }
 
 // mapExecutorError converts typed executor errors to appropriate HTTP responses.
@@ -1732,7 +1743,7 @@ func (h *Handler) GetProjectRun(c echo.Context) error {
 	}
 
 	dto := run.ToDTO()
-	dto.TokenUsage = h.getTokenUsage(c.Request().Context(), runID, run.TraceID)
+	h.enrichRunTrace(c.Request().Context(), dto, runID, run.TraceID)
 	dto.Workspace = h.getWorkspaceInfo(c.Request().Context(), runID)
 
 	return c.JSON(http.StatusOK, SuccessResponse(dto))
@@ -1817,7 +1828,7 @@ func (h *Handler) GetRunByID(c echo.Context) error {
 	}
 
 	dto := run.ToDTO()
-	dto.TokenUsage = h.getTokenUsage(c.Request().Context(), runID, run.TraceID)
+	h.enrichRunTrace(c.Request().Context(), dto, runID, run.TraceID)
 	dto.Workspace = h.getWorkspaceInfo(c.Request().Context(), runID)
 
 	return c.JSON(http.StatusOK, SuccessResponse(dto))
@@ -1976,7 +1987,7 @@ func (h *Handler) GetProjectRunFull(c echo.Context) error {
 	}
 
 	dto := run.ToDTO()
-	dto.TokenUsage = h.getTokenUsage(ctx, runID, run.TraceID)
+	h.enrichRunTrace(ctx, dto, runID, run.TraceID)
 	dto.Workspace = h.getWorkspaceInfo(ctx, runID)
 
 	msgDTOs := make([]*AgentRunMessageDTO, len(messages))
@@ -1999,7 +2010,7 @@ func (h *Handler) GetProjectRunFull(c echo.Context) error {
 		parent, perr := h.repo.FindRunByID(ctx, *run.ParentRunID)
 		if perr == nil && parent != nil {
 			parentDTO := parent.ToDTO()
-			parentDTO.TokenUsage = h.getTokenUsage(ctx, parent.ID, parent.TraceID)
+			h.enrichRunTrace(ctx, parentDTO, parent.ID, parent.TraceID)
 			full.ParentRun = parentDTO
 		}
 	}
