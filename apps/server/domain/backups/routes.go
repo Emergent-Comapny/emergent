@@ -9,6 +9,7 @@ import (
 func RegisterRoutes(e *echo.Echo, handler *Handler, authMiddleware *auth.Middleware) {
 	// Organization-level backup management
 	org := e.Group("/api/v1/organizations/:orgId")
+	org.Use(authMiddleware.RequireAuth())
 	{
 		org.GET("/backups", handler.ListBackups)
 		org.GET("/backups/:backupId", handler.GetBackup)
@@ -18,6 +19,7 @@ func RegisterRoutes(e *echo.Echo, handler *Handler, authMiddleware *auth.Middlew
 
 	// Project-level backup creation and restore
 	projects := e.Group("/api/v1/projects/:projectId")
+	projects.Use(authMiddleware.RequireAuth())
 	{
 		projects.POST("/backups", handler.CreateBackup)
 		projects.POST("/restore", handler.RestoreBackup)
