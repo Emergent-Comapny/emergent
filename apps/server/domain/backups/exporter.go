@@ -49,11 +49,7 @@ func (e *Exporter) ExportDocuments(ctx context.Context, w io.Writer, opts Export
 		Table("kb.documents").
 		Where("project_id = ?", opts.ProjectID)
 
-	if !opts.IncludeDeleted {
-		query = query.Where("deleted_at IS NULL")
-	}
-
-	return e.streamQuery(ctx, query, w, "documents")
+	return e.streamQuery(ctx, query, w, "documents", "id")
 }
 
 // ExportChunks exports chunks to NDJSON format
@@ -64,14 +60,10 @@ func (e *Exporter) ExportChunks(ctx context.Context, w io.Writer, opts ExportOpt
 		Join("INNER JOIN kb.documents d ON d.id = kb.chunks.document_id").
 		Where("d.project_id = ?", opts.ProjectID)
 
-	if !opts.IncludeDeleted {
-		query = query.Where("kb.chunks.deleted_at IS NULL")
-	}
-
 	// Select all chunk columns
 	query = query.Column("kb.chunks.*")
 
-	return e.streamQuery(ctx, query, w, "chunks")
+	return e.streamQuery(ctx, query, w, "chunks", "kb.chunks.id")
 }
 
 // ExportGraphObjects exports graph objects to NDJSON format
@@ -84,7 +76,7 @@ func (e *Exporter) ExportGraphObjects(ctx context.Context, w io.Writer, opts Exp
 		query = query.Where("deleted_at IS NULL")
 	}
 
-	return e.streamQuery(ctx, query, w, "graph_objects")
+	return e.streamQuery(ctx, query, w, "graph_objects", "id")
 }
 
 // ExportGraphRelationships exports graph relationships to NDJSON format
@@ -92,7 +84,7 @@ func (e *Exporter) ExportGraphRelationships(ctx context.Context, w io.Writer, op
 	// Join with graph_objects to filter by project
 	query := e.db.NewSelect().
 		Table("kb.graph_relationships").
-		Join("INNER JOIN kb.graph_objects o ON o.id = kb.graph_relationships.source_object_id").
+		Join("INNER JOIN kb.graph_objects o ON o.id = kb.graph_relationships.src_id").
 		Where("o.project_id = ?", opts.ProjectID)
 
 	if !opts.IncludeDeleted {
@@ -102,7 +94,7 @@ func (e *Exporter) ExportGraphRelationships(ctx context.Context, w io.Writer, op
 	// Select all relationship columns
 	query = query.Column("kb.graph_relationships.*")
 
-	return e.streamQuery(ctx, query, w, "graph_relationships")
+	return e.streamQuery(ctx, query, w, "graph_relationships", "kb.graph_relationships.id")
 }
 
 // ExportChatConversations exports chat conversations to NDJSON format
@@ -115,11 +107,7 @@ func (e *Exporter) ExportChatConversations(ctx context.Context, w io.Writer, opt
 		Table("kb.chat_conversations").
 		Where("project_id = ?", opts.ProjectID)
 
-	if !opts.IncludeDeleted {
-		query = query.Where("deleted_at IS NULL")
-	}
-
-	return e.streamQuery(ctx, query, w, "chat_conversations")
+	return e.streamQuery(ctx, query, w, "chat_conversations", "id")
 }
 
 // ExportChatMessages exports chat messages to NDJSON format
@@ -134,14 +122,10 @@ func (e *Exporter) ExportChatMessages(ctx context.Context, w io.Writer, opts Exp
 		Join("INNER JOIN kb.chat_conversations c ON c.id = kb.chat_messages.conversation_id").
 		Where("c.project_id = ?", opts.ProjectID)
 
-	if !opts.IncludeDeleted {
-		query = query.Where("kb.chat_messages.deleted_at IS NULL")
-	}
-
 	// Select all message columns
 	query = query.Column("kb.chat_messages.*")
 
-	return e.streamQuery(ctx, query, w, "chat_messages")
+	return e.streamQuery(ctx, query, w, "chat_messages", "kb.chat_messages.id")
 }
 
 // ExportExtractionJobs exports extraction jobs to NDJSON format
@@ -153,7 +137,7 @@ func (e *Exporter) ExportExtractionJobs(ctx context.Context, w io.Writer, opts E
 	// Only export completed jobs
 	query = query.Where("status IN ('completed', 'failed')")
 
-	return e.streamQuery(ctx, query, w, "extraction_jobs")
+	return e.streamQuery(ctx, query, w, "extraction_jobs", "id")
 }
 
 // ExportProjectMemberships exports project memberships to NDJSON format
@@ -162,28 +146,30 @@ func (e *Exporter) ExportProjectMemberships(ctx context.Context, w io.Writer, op
 		Table("kb.project_memberships").
 		Where("project_id = ?", opts.ProjectID)
 
-	return e.streamQuery(ctx, query, w, "project_memberships")
+	return e.streamQuery(ctx, query, w, "project_memberships", "id")
 }
 
-// streamQuery executes a query and streams results as NDJSON
-func (e *Exporter) streamQuery(ctx context.Context, query *bun.SelectQuery, w io.Writer, tableName string) (int, error) {
+// streamQuery executes a query and streams results as NDJSON. Rows are paged
+// with keyset pagination on idCol (the table's primary key) so large tables
+// export in linear time; ordering by idCol also makes the paging deterministic.
+func (e *Exporter) streamQuery(ctx context.Context, base *bun.SelectQuery, w io.Writer, tableName, idCol string) (int, error) {
 	encoder := json.NewEncoder(w)
 	count := 0
 	const batchSize = 1000
 
-	var offset int
+	var lastID string
 	for {
-		// Fetch batch
-		var rows []map[string]any
-		err := query.
-			Limit(batchSize).
-			Offset(offset).
-			Scan(ctx, &rows)
+		q := base.Clone().
+			Order(idCol).
+			Limit(batchSize)
+		if lastID != "" {
+			q = q.Where(idCol+" > CAST(? AS uuid)", lastID)
+		}
 
-		if err != nil {
+		var rows []map[string]any
+		if err := q.Scan(ctx, &rows); err != nil {
 			e.log.Error("failed to export table",
 				slog.String("table", tableName),
-				slog.Int("offset", offset),
 				slog.Any("error", err),
 			)
 			return count, fmt.Errorf("export %s: %w", tableName, err)
@@ -206,7 +192,10 @@ func (e *Exporter) streamQuery(ctx context.Context, query *bun.SelectQuery, w io
 			count++
 		}
 
-		offset += batchSize
+		if len(rows) < batchSize {
+			break
+		}
+		lastID = uuidString(rows[len(rows)-1]["id"])
 
 		// Check for cancellation
 		select {
@@ -222,6 +211,20 @@ func (e *Exporter) streamQuery(ctx context.Context, query *bun.SelectQuery, w io
 	)
 
 	return count, nil
+}
+
+// uuidString converts a scanned primary-key value (uuid) to its string form.
+// pgdriver scans uuid columns into []byte when the destination is interface{};
+// handle string and []byte defensively.
+func uuidString(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case []byte:
+		return string(t)
+	default:
+		return fmt.Sprint(t)
+	}
 }
 
 // ExportAll exports all project data and returns statistics
