@@ -260,7 +260,6 @@ func (c *Creator) exportFiles(ctx context.Context, zipWriter *zip.Writer, projec
 		Column("id", "filename", "storage_key", "mime_type").
 		Where("project_id = ?", projectID).
 		Where("storage_key IS NOT NULL").
-		Where("deleted_at IS NULL").
 		Scan(ctx, &documents)
 
 	if err != nil {

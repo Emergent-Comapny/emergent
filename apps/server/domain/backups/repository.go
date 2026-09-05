@@ -49,11 +49,13 @@ func (r *Repository) Create(ctx context.Context, backup *Backup) error {
 // GetByID retrieves a backup by ID
 func (r *Repository) GetByID(ctx context.Context, orgID, backupID string) (*Backup, error) {
 	var backup Backup
-	err := r.db.NewSelect().
+	q := r.db.NewSelect().
 		Model(&backup).
-		Where("id = ?", backupID).
-		Where("organization_id = ?", orgID).
-		Scan(ctx)
+		Where("id = ?", backupID)
+	if orgID != "" {
+		q = q.Where("organization_id = ?", orgID)
+	}
+	err := q.Scan(ctx)
 
 	if err == sql.ErrNoRows {
 		return nil, nil

@@ -111,7 +111,7 @@ func (s *Service) executeBackup(ctx context.Context, backupID string, req Create
 			slog.String("backup_id", backupID),
 			slog.Any("error", err),
 		)
-		s.markBackupFailed(ctx, backupID, err)
+		s.markBackupFailed(ctx, req.OrganizationID, backupID, err)
 		return
 	}
 	opts.ProjectName = projectName
@@ -122,7 +122,7 @@ func (s *Service) executeBackup(ctx context.Context, backupID string, req Create
 			slog.String("backup_id", backupID),
 			slog.Any("error", err),
 		)
-		s.markBackupFailed(ctx, backupID, err)
+		s.markBackupFailed(ctx, req.OrganizationID, backupID, err)
 		return
 	}
 
@@ -132,8 +132,8 @@ func (s *Service) executeBackup(ctx context.Context, backupID string, req Create
 }
 
 // markBackupFailed marks a backup as failed
-func (s *Service) markBackupFailed(ctx context.Context, backupID string, err error) {
-	backup, getErr := s.repo.GetByID(ctx, "", backupID)
+func (s *Service) markBackupFailed(ctx context.Context, orgID, backupID string, err error) {
+	backup, getErr := s.repo.GetByID(ctx, orgID, backupID)
 	if getErr != nil {
 		s.log.Error("failed to get backup for failure update",
 			slog.String("backup_id", backupID),
