@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -837,15 +838,15 @@ func (m *Middleware) cacheIntrospection(ctx context.Context, token string, claim
 		"name":        claims.Name,
 	}
 
-	_, err := m.db.NewInsert().
-		TableExpr("kb.auth_introspection_cache").
-		Model(&struct {
-			TokenHash         string         `bun:"token_hash"`
-			IntrospectionData map[string]any `bun:"introspection_data,type:jsonb"`
-			ExpiresAt         time.Time      `bun:"expires_at"`
-		}{
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+
+	_, err = m.db.NewInsert().
+		Model(&introspectionCacheEntry{
 			TokenHash:         tokenHash,
-			IntrospectionData: data,
+			IntrospectionData: raw,
 			ExpiresAt:         expiresAt,
 		}).
 		On("CONFLICT (token_hash) DO UPDATE").
