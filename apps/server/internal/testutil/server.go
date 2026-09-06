@@ -190,19 +190,19 @@ func NewTestServerWithLLM(testDB *TestDB) *TestServer {
 	schemaIndex := extraction.NewSchemaIndexMCPAdapter(extractionSchemaProvider)
 
 	mcpSvc := mcp.NewService(mcp.ServiceParams{
-		DB:                db,
-		GraphService:      graphSvc,
-		SearchSvc:         searchSvc,
-		Cfg:               testDB.Config,
-		Log:               log,
-		DocumentsSvc:      docsSvc,
-		SkillsRepo:        skillsRepo,
-		ApitokenSvc:       apitokenSvc,
-		DiscoverySvc:      discoverySvc,
-		DomainClassifier:  domainClassifier,
-		SchemaIndex:       schemaIndex,
+		DB:                 db,
+		GraphService:       graphSvc,
+		SearchSvc:          searchSvc,
+		Cfg:                testDB.Config,
+		Log:                log,
+		DocumentsSvc:       docsSvc,
+		SkillsRepo:         skillsRepo,
+		ApitokenSvc:        apitokenSvc,
+		DiscoverySvc:       discoverySvc,
+		DomainClassifier:   domainClassifier,
+		SchemaIndex:        schemaIndex,
 		ReextractionQueuer: reextractionQueuer,
-		DocSignalsReader:  docsSvc,
+		DocSignalsReader:   docsSvc,
 	})
 
 	toolPool := agents.NewToolPool(agents.ToolPoolConfig{
@@ -490,7 +490,7 @@ func newTestServerWithDB(testDB *TestDB, db bun.IDB) *TestServer {
 	// Register MCP registry routes
 	mcpRegistryRepo := mcpregistry.NewRepository(db)
 	mcpRegistryClient := mcpregistry.NewRegistryClient()
-	mcpRegistrySvc := mcpregistry.NewService(mcpRegistryRepo, mcpSvc, mcpRegistryClient, log, nil)
+	mcpRegistrySvc := mcpregistry.NewService(mcpRegistryRepo, mcpSvc, mcpRegistryClient, log)
 	mcpRegistryHandler := mcpregistry.NewHandler(mcpRegistrySvc)
 	mcpregistry.RegisterRoutes(e, mcpRegistryHandler, authMiddleware)
 

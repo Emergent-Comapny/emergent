@@ -790,29 +790,6 @@ func (h *Handler) formatSearchContext(results []search.UnifiedSearchResultItem) 
 	return b.String()
 }
 
-func formatFieldValue(v any) string {
-	if v == nil {
-		return "null"
-	}
-	switch val := v.(type) {
-	case string:
-		if len(val) > 100 {
-			return val[:100] + "…"
-		}
-		return val
-	default:
-		raw, err := json.Marshal(val)
-		if err != nil {
-			return "?"
-		}
-		s := string(raw)
-		if len(s) > 100 {
-			return s[:100] + "…"
-		}
-		return s
-	}
-}
-
 // friendlyProviderError returns a short, human-readable message when err is a
 // well-known LLM provider failure (expired/invalid API key, quota exceeded,
 // etc.), or falls back to the raw error string for anything else.
@@ -2328,14 +2305,6 @@ func buildAskContextPrefix(user *auth.AuthUser, projectID string) string {
 
 	sb.WriteString("</context>\n\n")
 	return sb.String()
-}
-
-// nilIfEmpty returns a pointer to s if s is non-empty, otherwise nil.
-func nilIfEmpty(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
 }
 
 // demoteStageForPolicy applies schema-policy enforcement to a classifier stage.

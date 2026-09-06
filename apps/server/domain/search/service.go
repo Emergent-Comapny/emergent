@@ -128,14 +128,6 @@ func (s *Service) Search(ctx context.Context, projectID uuid.UUID, req *UnifiedS
 	}, nil
 }
 
-// searchOutcome holds the result of a single search goroutine
-type searchOutcome struct {
-	results  any
-	elapsed  time.Duration
-	rawDebug any
-	err      error
-}
-
 // graphOutcome wraps graph search results with timing and debug data
 type graphOutcome struct {
 	results  []*UnifiedSearchGraphResult

@@ -7,8 +7,12 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/emergent-company/emergent.memory/internal/config"
+	"github.com/emergent-company/emergent.memory/pkg/apperror"
 	"github.com/emergent-company/emergent.memory/pkg/auth"
 )
+
+// Keep apperror imported for swagger type resolution (@Failure {object} apperror.Error).
+var _ = apperror.Error{}
 
 // Handler handles auth introspection HTTP requests
 type Handler struct {

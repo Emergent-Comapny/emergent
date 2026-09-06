@@ -994,7 +994,6 @@ func base64Encode(s string) string {
 type ContainerAttachment struct {
 	Conn   io.ReadWriteCloser // Bidirectional connection to container
 	Reader io.Reader          // Demuxed stdout reader
-	conn   interface{ CloseWrite() error }
 }
 
 // Close closes the container attachment.

@@ -18,9 +18,6 @@ const (
 	// background writer blocks. Sized to hold ~30 seconds of heavy traffic.
 	usageBufferSize = 1024
 
-	// usageFlushTimeout is how long the shutdown waits for the buffer to drain.
-	usageFlushTimeout = 10 * time.Second
-
 	// pricePerMillionTokens is the divisor for per-token cost calculation
 	// (all prices in the DB are stored per 1M tokens).
 	pricePerMillionTokens = 1_000_000.0

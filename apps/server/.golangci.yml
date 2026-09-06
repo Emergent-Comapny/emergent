@@ -28,6 +28,11 @@ linters:
       - linters:
           - all
         path: migrations/
+      # Swiftbridge goXxx functions are called by the CGO export layer (bridge.go),
+      # which is excluded when building without cgo — `unused` false-positives.
+      - linters:
+          - unused
+        path: cmd/swiftbridge/
     paths:
       - third_party$
       - builtin$

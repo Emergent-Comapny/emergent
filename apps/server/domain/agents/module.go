@@ -38,9 +38,7 @@ var Module = fx.Module("agents",
 		provideWebhookRateLimiter,
 		provideWorkerPool,
 		provideStaleRunReaper,
-		provideAgentToolHandlerForMCP,
 		provideSessionTitleHandlerForMCP,
-		provideToolPoolInvalidator,
 		provideOrgToolPoolInvalidator,
 	),
 	fx.Invoke(
@@ -51,6 +49,8 @@ var Module = fx.Module("agents",
 		registerWorkerPool,
 		registerHandlerMCPToolHandler,
 		registerRelayToolPoolInvalidator,
+		registerAgentToolHandler,
+		registerToolPoolInvalidator,
 		registerStaleRunReaper,
 	),
 )
@@ -137,10 +137,10 @@ func provideMCPToolHandler(repo *Repository, executor *AgentExecutor, log *slog.
 	return NewMCPToolHandler(repo, executor, log, extractionJobs, embeddingJobs)
 }
 
-// provideAgentToolHandlerForMCP exposes the MCPToolHandler as mcp.AgentToolHandler
-// (agents → mcp, injected via fx to avoid a setter).
-func provideAgentToolHandlerForMCP(handler *MCPToolHandler) mcp.AgentToolHandler {
-	return handler
+// registerAgentToolHandler wires the MCPToolHandler into mcp.Service after
+// construction (agents → mcp; deferred to fx.Invoke to break the constructor cycle).
+func registerAgentToolHandler(mcpService *mcp.Service, handler *MCPToolHandler) {
+	mcpService.RegisterAgentToolHandler(handler)
 }
 
 // registerHandlerMCPToolHandler injects the MCPToolHandler into the REST Handler
@@ -208,10 +208,10 @@ func registerAgentTriggers(lc fx.Lifecycle, ts *TriggerService) {
 	})
 }
 
-// provideToolPoolInvalidator exposes the ToolPool as mcpregistry.ToolPoolInvalidator
-// so registry mutations automatically invalidate the ToolPool cache.
-func provideToolPoolInvalidator(toolPool *ToolPool) mcpregistry.ToolPoolInvalidator {
-	return toolPool
+// registerToolPoolInvalidator wires the ToolPool into mcpregistry.Service after
+// construction (mcpregistry → agents; deferred to fx.Invoke to break the constructor cycle).
+func registerToolPoolInvalidator(registryService *mcpregistry.Service, toolPool *ToolPool) {
+	registryService.RegisterToolPoolInvalidator(toolPool)
 }
 
 // provideOrgToolPoolInvalidator exposes the ToolPool as orgs.ToolPoolInvalidator

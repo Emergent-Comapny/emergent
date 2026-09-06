@@ -150,12 +150,10 @@ type ServiceParams struct {
 
 	// Cross-domain tool handlers (optional — wired via fx.Provide adapters to
 	// avoid circular imports; nil-safe when the providing feature is disabled).
-	AgentToolHandler       AgentToolHandler       `optional:"true"`
-	BlueprintToolHandler   BlueprintToolHandler   `optional:"true"`
-	SessionTitleHandler    SessionTitleHandler    `optional:"true"`
-	SessionHistoryProvider SessionHistoryProvider `optional:"true"`
-	GraphObjectPatcher     GraphObjectPatcher     `optional:"true"`
-	MCPRegistryToolHandler MCPRegistryToolHandler `optional:"true"`
+	BlueprintToolHandler   BlueprintToolHandler    `optional:"true"`
+	SessionTitleHandler    SessionTitleHandler     `optional:"true"`
+	SessionHistoryProvider SessionHistoryProvider  `optional:"true"`
+	GraphObjectPatcher     GraphObjectPatcher      `optional:"true"`
 	EmbeddingCtl           EmbeddingControlHandler `optional:"true"`
 	DomainClassifier       DomainClassifierHandler `optional:"true"`
 	SchemaIndex            SchemaIndexHandler      `optional:"true"`
@@ -177,39 +175,49 @@ func NewService(p ServiceParams) *Service {
 		tempoURL = cfg.Otel.InternalTempoQueryURL()
 	}
 	return &Service{
-		db:                 p.DB,
-		graphService:       p.GraphService,
-		searchSvc:          p.SearchSvc,
-		braveSearchAPIKey:  cfg.BraveSearch.APIKey,
-		braveSearchTimeout: timeout,
-		log:                p.Log.With(logger.Scope("mcp.svc")),
-		documentsSvc:       p.DocumentsSvc,
-		storageSvc:         p.StorageSvc,
-		skillsRepo:         p.SkillsRepo,
-		branchSvc:          p.BranchSvc,
-		providerCredSvc:    p.ProviderCredSvc,
-		providerCatalogSvc: p.ProviderCatalogSvc,
-		apitokenSvc:        p.ApitokenSvc,
-		emailSvc:           p.EmailSvc,
-		tempoBaseURL:       tempoURL,
-		serverPort:         cfg.ServerPort,
-		journalSvc:         p.JournalSvc,
-		schemasSvc:         p.SchemasSvc,
-		sessionTodoSvc:     p.SessionTodoSvc,
-		agentToolHandler:       p.AgentToolHandler,
-		blueprintToolHandler:   p.BlueprintToolHandler,
-		sessionTitleHandler:    p.SessionTitleHandler,
-		sessionHistoryProvider: p.SessionHistoryProvider,
+		db:                      p.DB,
+		graphService:            p.GraphService,
+		searchSvc:               p.SearchSvc,
+		braveSearchAPIKey:       cfg.BraveSearch.APIKey,
+		braveSearchTimeout:      timeout,
+		log:                     p.Log.With(logger.Scope("mcp.svc")),
+		documentsSvc:            p.DocumentsSvc,
+		storageSvc:              p.StorageSvc,
+		skillsRepo:              p.SkillsRepo,
+		branchSvc:               p.BranchSvc,
+		providerCredSvc:         p.ProviderCredSvc,
+		providerCatalogSvc:      p.ProviderCatalogSvc,
+		apitokenSvc:             p.ApitokenSvc,
+		emailSvc:                p.EmailSvc,
+		tempoBaseURL:            tempoURL,
+		serverPort:              cfg.ServerPort,
+		journalSvc:              p.JournalSvc,
+		schemasSvc:              p.SchemasSvc,
+		sessionTodoSvc:          p.SessionTodoSvc,
+		blueprintToolHandler:    p.BlueprintToolHandler,
+		sessionTitleHandler:     p.SessionTitleHandler,
+		sessionHistoryProvider:  p.SessionHistoryProvider,
 		graphObjectTitlePatcher: p.GraphObjectPatcher,
-		mcpRegistryToolHandler: p.MCPRegistryToolHandler,
-		embeddingCtl:           p.EmbeddingCtl,
-		domainClassifier:       p.DomainClassifier,
-		schemaIndex:            p.SchemaIndex,
-		reextractionQueuer:     p.ReextractionQueuer,
-		discoverySvc:           p.DiscoverySvc,
-		docSignalsReader:       p.DocSignalsReader,
-		relaySvc:               p.RelaySvc,
+		embeddingCtl:            p.EmbeddingCtl,
+		domainClassifier:        p.DomainClassifier,
+		schemaIndex:             p.SchemaIndex,
+		reextractionQueuer:      p.ReextractionQueuer,
+		discoverySvc:            p.DiscoverySvc,
+		docSignalsReader:        p.DocSignalsReader,
+		relaySvc:                p.RelaySvc,
 	}
+}
+
+// RegisterAgentToolHandler wires the agent tool handler after construction.
+// Deferred to fx.Invoke to break the agents ↔ mcp constructor cycle.
+func (s *Service) RegisterAgentToolHandler(h AgentToolHandler) {
+	s.agentToolHandler = h
+}
+
+// RegisterMCPRegistryToolHandler wires the MCP registry tool handler after construction.
+// Deferred to fx.Invoke to break the mcpregistry ↔ mcp constructor cycle.
+func (s *Service) RegisterMCPRegistryToolHandler(h MCPRegistryToolHandler) {
+	s.mcpRegistryToolHandler = h
 }
 
 // GetToolDefinitions returns all available MCP tools
@@ -3119,12 +3127,6 @@ func (s *Service) resolveEntityIDByKey(ctx context.Context, projectID uuid.UUID,
 		return uuid.Nil, fmt.Errorf("entity with key %q not found", key)
 	}
 	return canonicalID, nil
-}
-
-// keySuggestion is a candidate match returned by suggestEntityKeysByFuzzy.
-type keySuggestion struct {
-	Key  string
-	Type string
 }
 
 // suggestEntityKeysByFuzzy returns up to limit entity keys from the project that

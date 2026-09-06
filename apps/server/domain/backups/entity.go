@@ -66,19 +66,19 @@ const (
 type Restore struct {
 	bun.BaseModel `bun:"table:kb.restores,alias:r"`
 
-	ID             string         `bun:"id,pk,type:uuid,default:gen_random_uuid()" json:"id"`
-	OrganizationID string         `bun:"organization_id,notnull,type:uuid" json:"organizationId"`
-	BackupID       string         `bun:"backup_id,notnull,type:uuid" json:"backupId"`
-	Mode           string         `bun:"mode,notnull" json:"mode"` // overwrite | clone
-	SourceProjectID *string       `bun:"source_project_id,type:uuid" json:"sourceProjectId,omitempty"`
-	TargetProjectID *string       `bun:"target_project_id,type:uuid" json:"targetProjectId,omitempty"`
-	Status         string         `bun:"status,notnull,default:'pending'" json:"status"` // pending|running|completed|failed
-	Progress       int            `bun:"progress,notnull,default:0" json:"progress"`
-	ErrorMessage   *string        `bun:"error_message" json:"errorMessage,omitempty"`
-	Stats          map[string]any `bun:"stats,type:jsonb" json:"stats,omitempty"`
-	CreatedAt      time.Time      `bun:"created_at,notnull,default:now()" json:"createdAt"`
-	CreatedBy      *string        `bun:"created_by,type:uuid" json:"createdBy,omitempty"`
-	CompletedAt    *time.Time     `bun:"completed_at" json:"completedAt,omitempty"`
+	ID              string         `bun:"id,pk,type:uuid,default:gen_random_uuid()" json:"id"`
+	OrganizationID  string         `bun:"organization_id,notnull,type:uuid" json:"organizationId"`
+	BackupID        string         `bun:"backup_id,notnull,type:uuid" json:"backupId"`
+	Mode            string         `bun:"mode,notnull" json:"mode"` // overwrite | clone
+	SourceProjectID *string        `bun:"source_project_id,type:uuid" json:"sourceProjectId,omitempty"`
+	TargetProjectID *string        `bun:"target_project_id,type:uuid" json:"targetProjectId,omitempty"`
+	Status          string         `bun:"status,notnull,default:'pending'" json:"status"` // pending|running|completed|failed
+	Progress        int            `bun:"progress,notnull,default:0" json:"progress"`
+	ErrorMessage    *string        `bun:"error_message" json:"errorMessage,omitempty"`
+	Stats           map[string]any `bun:"stats,type:jsonb" json:"stats,omitempty"`
+	CreatedAt       time.Time      `bun:"created_at,notnull,default:now()" json:"createdAt"`
+	CreatedBy       *string        `bun:"created_by,type:uuid" json:"createdBy,omitempty"`
+	CompletedAt     *time.Time     `bun:"completed_at" json:"completedAt,omitempty"`
 }
 
 // Restore status constants.
@@ -158,15 +158,15 @@ type BackupStats struct {
 
 // Manifest represents the manifest.json file inside a backup ZIP
 type Manifest struct {
-	Version       string                `json:"version"`
-	SchemaVersion string                `json:"schemaVersion"`
-	CreatedAt     time.Time             `json:"createdAt"`
-	BackupType    string                `json:"backupType"`
-	Project       ProjectInfo           `json:"project"`
-	Contents      BackupStats           `json:"contents"`
-	Files         map[string]FileEntry  `json:"files"`
-	Checksums     Checksums             `json:"checksums"`
-	Metadata      map[string]any        `json:"metadata"`
+	Version       string               `json:"version"`
+	SchemaVersion string               `json:"schemaVersion"`
+	CreatedAt     time.Time            `json:"createdAt"`
+	BackupType    string               `json:"backupType"`
+	Project       ProjectInfo          `json:"project"`
+	Contents      BackupStats          `json:"contents"`
+	Files         map[string]FileEntry `json:"files"`
+	Checksums     Checksums            `json:"checksums"`
+	Metadata      map[string]any       `json:"metadata"`
 }
 
 // FileEntry maps an exported file's storage_key to its human-facing metadata.

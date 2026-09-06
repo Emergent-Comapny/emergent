@@ -2638,19 +2638,6 @@ func (s *Service) HybridSearch(ctx context.Context, projectID uuid.UUID, req *Hy
 	return resp, nil
 }
 
-// calcStdDev calculates standard deviation from mean.
-func calcStdDev(scores []float32, mean float32) float64 {
-	if len(scores) == 0 {
-		return 0
-	}
-	var sumSq float64
-	for _, s := range scores {
-		diff := float64(s - mean)
-		sumSq += diff * diff
-	}
-	return math.Sqrt(sumSq / float64(len(scores)))
-}
-
 // zScoreNormalize applies z-score normalization.
 func zScoreNormalize(score, mean, std float32) float32 {
 	return (score - mean) / std

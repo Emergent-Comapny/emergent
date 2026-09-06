@@ -5,8 +5,12 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/emergent-company/emergent.memory/pkg/apperror"
 	"github.com/emergent-company/emergent.memory/pkg/auth"
 )
+
+// Keep apperror imported for swagger type resolution (@Failure {object} apperror.Error).
+var _ = apperror.Error{}
 
 // Handler handles HTTP requests for user access
 type Handler struct {

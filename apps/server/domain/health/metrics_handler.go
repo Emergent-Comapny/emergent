@@ -7,8 +7,12 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/uptrace/bun"
 
+	"github.com/emergent-company/emergent.memory/pkg/apperror"
 	"github.com/emergent-company/emergent.memory/pkg/auth"
 )
+
+// Keep apperror imported for swagger type resolution (@Failure {object} apperror.Error).
+var _ = apperror.Error{}
 
 // MetricsHandler handles job metrics requests
 type MetricsHandler struct {
@@ -40,16 +44,6 @@ type AllJobMetrics struct {
 	Scope     string            `json:"scope"`                // "project" or "account"
 	ProjectID string            `json:"project_id,omitempty"` // set when scope=project
 	Timestamp string            `json:"timestamp"`
-}
-
-// queueDef describes a job queue and how to scope it.
-type queueDef struct {
-	name string
-	// baseQuery is the full SELECT ... FROM ... (optionally with a WHERE placeholder).
-	// Use a func so we can build the right query per-scope at runtime.
-	projectQuery string // query when scoped to a project (includes project filter)
-	globalQuery  string // query when not scoped (all projects)
-	systemOnly   bool   // if true, only include when scope=account (e.g. email)
 }
 
 const selectCounts = `
