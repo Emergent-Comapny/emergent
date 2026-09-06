@@ -153,23 +153,10 @@ func (e *Exporter) exportTable(ctx context.Context, cfg tableConfig, w io.Writer
 	var vectorCols []string
 	for _, col := range cols {
 		colSet[col.Name] = true
-		switch {
-		case containsString(cfg.vectorColumns, col.Name) || col.UDTName == "vector" || col.UDTName == "halfvec":
-			// pgvector columns have no registered pgx codec; cast to text so the
-			// value deterministically arrives as a string, then parse it below.
-			exprs = append(exprs, fmt.Sprintf("t.%s::text AS %s", quoteIdent(col.Name), quoteIdent(col.Name)))
+		expr, isVector := selectColumnExpr(col, containsString(cfg.vectorColumns, col.Name))
+		exprs = append(exprs, expr)
+		if isVector {
 			vectorCols = append(vectorCols, col.Name)
-		case col.UDTName == "jsonb" || col.DataType == "jsonb" || col.DataType == "json":
-			// pgx scans jsonb/json into any as raw []byte, which json.Marshal
-			// base64-encodes. Cast ::text so the raw JSON text arrives as a string
-			// and the importer binds it straight back to jsonb.
-			exprs = append(exprs, fmt.Sprintf("t.%s::text AS %s", quoteIdent(col.Name), quoteIdent(col.Name)))
-		case col.DataType == "ARRAY":
-			// pgx scans text[]/uuid[] into any as raw []byte too; cast ::text to
-			// get the array-literal string the importer binds back with ?::<udt>.
-			exprs = append(exprs, fmt.Sprintf("t.%s::text AS %s", quoteIdent(col.Name), quoteIdent(col.Name)))
-		default:
-			exprs = append(exprs, "t."+quoteIdent(col.Name))
 		}
 	}
 
@@ -200,6 +187,23 @@ func (e *Exporter) exportTable(ctx context.Context, cfg tableConfig, w io.Writer
 	}
 
 	return e.streamQuery(ctx, query, w, cfg.name, vectorCols)
+}
+
+// selectColumnExpr returns the SELECT expression for a column and whether it is
+// a vector column (needing post-parse to []float32). jsonb/json/array columns
+// are cast ::text because pgx scans them into any as raw []byte, which
+// json.Marshal base64-encodes; casting yields a plain string that round-trips.
+func selectColumnExpr(col colInfo, vectorListed bool) (expr string, isVector bool) {
+	if vectorListed || col.UDTName == "vector" || col.UDTName == "halfvec" {
+		return fmt.Sprintf("t.%s::text AS %s", quoteIdent(col.Name), quoteIdent(col.Name)), true
+	}
+	if col.UDTName == "jsonb" || col.DataType == "jsonb" || col.DataType == "json" {
+		return fmt.Sprintf("t.%s::text AS %s", quoteIdent(col.Name), quoteIdent(col.Name)), false
+	}
+	if col.DataType == "ARRAY" {
+		return fmt.Sprintf("t.%s::text AS %s", quoteIdent(col.Name), quoteIdent(col.Name)), false
+	}
+	return "t." + quoteIdent(col.Name), false
 }
 
 // branchRow is the minimal shape of kb.branches needed to re-derive lineage.
