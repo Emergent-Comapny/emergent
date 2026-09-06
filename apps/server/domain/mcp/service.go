@@ -147,6 +147,22 @@ type ServiceParams struct {
 	JournalSvc         *journal.Service
 	SchemasSvc         *schemas.Service
 	SessionTodoSvc     *sessiontodos.Service
+
+	// Cross-domain tool handlers (optional — wired via fx.Provide adapters to
+	// avoid circular imports; nil-safe when the providing feature is disabled).
+	AgentToolHandler       AgentToolHandler       `optional:"true"`
+	BlueprintToolHandler   BlueprintToolHandler   `optional:"true"`
+	SessionTitleHandler    SessionTitleHandler    `optional:"true"`
+	SessionHistoryProvider SessionHistoryProvider `optional:"true"`
+	GraphObjectPatcher     GraphObjectPatcher     `optional:"true"`
+	MCPRegistryToolHandler MCPRegistryToolHandler `optional:"true"`
+	EmbeddingCtl           EmbeddingControlHandler `optional:"true"`
+	DomainClassifier       DomainClassifierHandler `optional:"true"`
+	SchemaIndex            SchemaIndexHandler      `optional:"true"`
+	ReextractionQueuer     ReextractionQueuer      `optional:"true"`
+	DiscoverySvc           DiscoveryFinalizer      `optional:"true"`
+	DocSignalsReader       DocumentSignalsReader   `optional:"true"`
+	RelaySvc               RelayToolProvider       `optional:"true"`
 }
 
 // NewService creates a new MCP service
@@ -180,76 +196,20 @@ func NewService(p ServiceParams) *Service {
 		journalSvc:         p.JournalSvc,
 		schemasSvc:         p.SchemasSvc,
 		sessionTodoSvc:     p.SessionTodoSvc,
+		agentToolHandler:       p.AgentToolHandler,
+		blueprintToolHandler:   p.BlueprintToolHandler,
+		sessionTitleHandler:    p.SessionTitleHandler,
+		sessionHistoryProvider: p.SessionHistoryProvider,
+		graphObjectTitlePatcher: p.GraphObjectPatcher,
+		mcpRegistryToolHandler: p.MCPRegistryToolHandler,
+		embeddingCtl:           p.EmbeddingCtl,
+		domainClassifier:       p.DomainClassifier,
+		schemaIndex:            p.SchemaIndex,
+		reextractionQueuer:     p.ReextractionQueuer,
+		discoverySvc:           p.DiscoverySvc,
+		docSignalsReader:       p.DocSignalsReader,
+		relaySvc:               p.RelaySvc,
 	}
-}
-
-// SetAgentToolHandler sets the agent tool handler (called after construction to break circular init)
-func (s *Service) SetAgentToolHandler(h AgentToolHandler) {
-	s.agentToolHandler = h
-}
-
-// SetBlueprintToolHandler sets the blueprint tool handler (called after
-// construction to break the circular init between mcp and blueprints).
-func (s *Service) SetBlueprintToolHandler(h BlueprintToolHandler) {
-	s.blueprintToolHandler = h
-}
-
-// SetSessionTitleHandler sets the session title handler (called after construction to break circular init)
-func (s *Service) SetSessionTitleHandler(h SessionTitleHandler) {
-	s.sessionTitleHandler = h
-}
-
-// SetSessionHistoryProvider injects the session history provider used by session-get-messages.
-// Called after construction (agents → mcp circular import avoided via interface).
-func (s *Service) SetSessionHistoryProvider(p SessionHistoryProvider) {
-	s.sessionHistoryProvider = p
-}
-
-// SetGraphObjectPatcher sets the func used to patch graph object Properties.title
-// when set_session_title is called. Called after construction to avoid circular init.
-func (s *Service) SetGraphObjectPatcher(fn func(ctx context.Context, projectID, objectID, title string) error) {
-	s.graphObjectTitlePatcher = fn
-}
-
-// SetMCPRegistryToolHandler sets the MCP registry tool handler (called after construction to break circular init)
-func (s *Service) SetMCPRegistryToolHandler(h MCPRegistryToolHandler) {
-	s.mcpRegistryToolHandler = h
-}
-
-// SetEmbeddingControlHandler sets the embedding worker controller (injected to break import cycle with extraction).
-func (s *Service) SetEmbeddingControlHandler(h EmbeddingControlHandler) {
-	s.embeddingCtl = h
-}
-
-// SetDomainClassifier injects the document classifier (breaks import cycle with extraction).
-func (s *Service) SetDomainClassifier(h DomainClassifierHandler) {
-	s.domainClassifier = h
-}
-
-// SetSchemaIndex injects the schema index handler (breaks import cycle with extraction).
-func (s *Service) SetSchemaIndex(h SchemaIndexHandler) {
-	s.schemaIndex = h
-}
-
-// SetReextractionQueuer injects the reextraction queue (breaks import cycle with extraction).
-func (s *Service) SetReextractionQueuer(h ReextractionQueuer) {
-	s.reextractionQueuer = h
-}
-
-// SetDiscoveryService injects the discovery jobs service.
-func (s *Service) SetDiscoveryService(svc DiscoveryFinalizer) {
-	s.discoverySvc = svc
-}
-
-// SetDocumentSignalsReader injects the document signals reader (breaks import cycle with documents).
-func (s *Service) SetDocumentSignalsReader(r DocumentSignalsReader) {
-	s.docSignalsReader = r
-}
-
-// SetRelayProvider wires the MCP relay service so relay-registered tools appear
-// in tools/list and relay tool calls are forwarded correctly.
-func (s *Service) SetRelayProvider(p RelayToolProvider) {
-	s.relaySvc = p
 }
 
 // GetToolDefinitions returns all available MCP tools

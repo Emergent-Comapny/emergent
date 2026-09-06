@@ -38,6 +38,10 @@ var Module = fx.Module("agents",
 		provideWebhookRateLimiter,
 		provideWorkerPool,
 		provideStaleRunReaper,
+		provideAgentToolHandlerForMCP,
+		provideSessionTitleHandlerForMCP,
+		provideToolPoolInvalidator,
+		provideOrgToolPoolInvalidator,
 	),
 	fx.Invoke(
 		RegisterRoutes,
@@ -45,11 +49,7 @@ var Module = fx.Module("agents",
 		registerAgentTriggers,
 		registerOrphanRecovery,
 		registerWorkerPool,
-		registerAgentToolHandler,
 		registerHandlerMCPToolHandler,
-		registerSessionTitleHandler,
-		registerToolPoolInvalidator,
-		registerOrgToolPoolInvalidator,
 		registerRelayToolPoolInvalidator,
 		registerStaleRunReaper,
 	),
@@ -133,14 +133,14 @@ func provideTriggerService(
 }
 
 // provideMCPToolHandler creates an MCPToolHandler from fx dependencies.
-func provideMCPToolHandler(repo *Repository, executor *AgentExecutor, log *slog.Logger) *MCPToolHandler {
-	return NewMCPToolHandler(repo, executor, log)
+func provideMCPToolHandler(repo *Repository, executor *AgentExecutor, log *slog.Logger, extractionJobs mcp.ExtractionJobFinder, embeddingJobs mcp.EmbeddingJobFinder) *MCPToolHandler {
+	return NewMCPToolHandler(repo, executor, log, extractionJobs, embeddingJobs)
 }
 
-// registerAgentToolHandler injects the MCPToolHandler into the MCP Service
-// via setter injection to break the circular dependency (agents → mcp).
-func registerAgentToolHandler(mcpService *mcp.Service, handler *MCPToolHandler) {
-	mcpService.SetAgentToolHandler(handler)
+// provideAgentToolHandlerForMCP exposes the MCPToolHandler as mcp.AgentToolHandler
+// (agents → mcp, injected via fx to avoid a setter).
+func provideAgentToolHandlerForMCP(handler *MCPToolHandler) mcp.AgentToolHandler {
+	return handler
 }
 
 // registerHandlerMCPToolHandler injects the MCPToolHandler into the REST Handler
@@ -150,10 +150,10 @@ func registerHandlerMCPToolHandler(h *Handler, mcpToolHandler *MCPToolHandler) {
 	h.WithMCPToolHandler(mcpToolHandler)
 }
 
-// registerSessionTitleHandler injects the Repository (as SessionTitleHandler) into
-// the MCP Service so the set_session_title built-in tool can update session metadata.
-func registerSessionTitleHandler(mcpService *mcp.Service, repo *Repository) {
-	mcpService.SetSessionTitleHandler(repo)
+// provideSessionTitleHandlerForMCP exposes the Repository as mcp.SessionTitleHandler
+// so the set_session_title built-in tool can update session metadata.
+func provideSessionTitleHandlerForMCP(repo *Repository) mcp.SessionTitleHandler {
+	return repo
 }
 
 // registerOrphanRecovery marks any agent runs that were left in "running" status
@@ -208,17 +208,16 @@ func registerAgentTriggers(lc fx.Lifecycle, ts *TriggerService) {
 	})
 }
 
-// registerToolPoolInvalidator injects the ToolPool into the MCP registry service
-// so that registry mutations (create/update/delete server, sync/toggle tools)
-// automatically invalidate the ToolPool cache for the affected project.
-func registerToolPoolInvalidator(registryService *mcpregistry.Service, toolPool *ToolPool) {
-	registryService.SetToolPoolInvalidator(toolPool)
+// provideToolPoolInvalidator exposes the ToolPool as mcpregistry.ToolPoolInvalidator
+// so registry mutations automatically invalidate the ToolPool cache.
+func provideToolPoolInvalidator(toolPool *ToolPool) mcpregistry.ToolPoolInvalidator {
+	return toolPool
 }
 
-// registerOrgToolPoolInvalidator injects the ToolPool into the orgs service
-// so that org-level tool setting changes automatically invalidate the ToolPool cache.
-func registerOrgToolPoolInvalidator(orgService *orgs.Service, toolPool *ToolPool) {
-	orgService.SetToolPoolInvalidator(toolPool)
+// provideOrgToolPoolInvalidator exposes the ToolPool as orgs.ToolPoolInvalidator
+// so org-level tool setting changes automatically invalidate the ToolPool cache.
+func provideOrgToolPoolInvalidator(toolPool *ToolPool) orgs.ToolPoolInvalidator {
+	return toolPool
 }
 
 // registerRelayToolPoolInvalidator wires the ToolPool into the mcprelay service

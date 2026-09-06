@@ -29,22 +29,18 @@ type Service struct {
 }
 
 // NewService creates a new MCP registry service.
-func NewService(repo *Repository, mcpService *mcp.Service, registryClient *RegistryClient, log *slog.Logger) *Service {
+// toolPoolInvalidator is optional (nil-safe) — it is not wired when the agents
+// feature is disabled, breaking the circular dependency mcpregistry → agents.
+func NewService(repo *Repository, mcpService *mcp.Service, registryClient *RegistryClient, log *slog.Logger, toolPoolInvalidator ToolPoolInvalidator) *Service {
 	return &Service{
-		repo:              repo,
-		mcpService:        mcpService,
-		proxy:             NewProxyManager(repo, log),
-		registryClient:    registryClient,
-		log:               log.With(logger.Scope("mcpregistry.svc")),
-		builtinRegistered: make(map[string]bool),
+		repo:                repo,
+		mcpService:          mcpService,
+		proxy:               NewProxyManager(repo, log),
+		registryClient:      registryClient,
+		log:                 log.With(logger.Scope("mcpregistry.svc")),
+		builtinRegistered:   make(map[string]bool),
+		toolPoolInvalidator: toolPoolInvalidator,
 	}
-}
-
-// SetToolPoolInvalidator sets the callback used to invalidate the ToolPool cache
-// when MCP server configurations change. Called after construction via fx.Invoke
-// to break the circular dependency (mcpregistry cannot import agents).
-func (s *Service) SetToolPoolInvalidator(inv ToolPoolInvalidator) {
-	s.toolPoolInvalidator = inv
 }
 
 // invalidateToolPool notifies the ToolPool to rebuild its cache for a project.

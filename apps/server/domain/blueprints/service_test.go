@@ -22,7 +22,7 @@ import (
 func newServiceFromBun(t *testing.T, db *bun.DB) *Service {
 	t.Helper()
 	repo := NewRepository(db, testLogger())
-	return NewService(repo, nil, nil, nil, nil, testLogger())
+	return NewService(ServiceParams{Repo: repo, Log: testLogger()})
 }
 
 // TestService_CreateBlueprint_Success verifies a created blueprint is a draft

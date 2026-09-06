@@ -30,25 +30,30 @@ var Module = fx.Module("mcpregistry",
 	),
 	fx.Invoke(
 		RegisterRoutes,
-		registerMCPRegistryToolHandler,
 		registerServiceLifecycle,
 	),
 )
 
+// serviceParams bundles dependencies for provideService.
+type serviceParams struct {
+	fx.In
+
+	Repo               *Repository
+	MCPService         *mcp.Service
+	RegistryClient     *RegistryClient
+	Log                *slog.Logger
+	ToolPoolInvalidator ToolPoolInvalidator `optional:"true"`
+}
+
 // provideService creates a Service from fx dependencies.
-func provideService(repo *Repository, mcpService *mcp.Service, registryClient *RegistryClient, log *slog.Logger) *Service {
-	return NewService(repo, mcpService, registryClient, log)
+func provideService(p serviceParams) *Service {
+	return NewService(p.Repo, p.MCPService, p.RegistryClient, p.Log, p.ToolPoolInvalidator)
 }
 
-// provideMCPRegistryToolHandler creates an MCPRegistryToolHandler from fx dependencies.
-func provideMCPRegistryToolHandler(svc *Service, log *slog.Logger) *MCPRegistryToolHandler {
+// provideMCPRegistryToolHandler exposes the MCP registry tool handler as
+// mcp.MCPRegistryToolHandler (mcpregistry → mcp, injected via fx to avoid a setter).
+func provideMCPRegistryToolHandler(svc *Service, log *slog.Logger) mcp.MCPRegistryToolHandler {
 	return NewMCPRegistryToolHandler(svc, log)
-}
-
-// registerMCPRegistryToolHandler injects the MCPRegistryToolHandler into the MCP Service
-// via setter injection to break the circular dependency (mcpregistry → mcp).
-func registerMCPRegistryToolHandler(mcpService *mcp.Service, handler *MCPRegistryToolHandler) {
-	mcpService.SetMCPRegistryToolHandler(handler)
 }
 
 // registerServiceLifecycle registers the service's Close method with the fx lifecycle

@@ -13,7 +13,7 @@ cd "$(dirname "$0")/.." # resolve to apps/server/
 
 # ── Baselines (recorded 2026-09-06 after P0b auth-guard cleanup) ─────────────
 BASELINE_AUTH_GUARDS=10       # inline `if user == nil` guards in domain handlers
-BASELINE_SETTERS=21           # cross-domain `func (s *Service) SetXxx` wiring
+BASELINE_SETTERS=3            # cross-domain `func (s *Service) SetXxx` wiring (remaining 3 are false positives: chat.SetAgentDefinitionID DB method + 2 agents HTTP handlers)
 BASELINE_APPERROR_STYLEA=1167 # `apperror.Err*.WithMessage/WithInternal` chaining
 BASELINE_RESPONSE_TYPES=6     # non-httputil APIResponse/PaginatedResponse/SuccessResponse defs
 
