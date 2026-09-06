@@ -44,21 +44,11 @@
 
 ## 5. Explicit Domain Interfaces (setter injection removal)
 
-> Re-sync (Sep 2026): grew from 9 → **21** cross-domain wiring setters. `mcp.Service` alone has 12 `SetXxx` methods. Full inventory: `projects`(2), `mcpregistry`(1), `orgs`(1), `blueprints`(1), `mcp`(12), `chat`(1, DB op), `agents`(2, HTTP handlers). The 7 originally-scoped interfaces below are still the right shape, but `mcp.Service` needs 5 more.
+> **DONE (Sep 2026).** All 21 cross-domain `SetXxx` wiring setters removed and replaced with interfaces injected via `fx` constructor params (`fx.In` optional fields + `fx.Provide` adapters in `module.go`/`main.go`). `mcp.Service` (13), `projects` (2), `mcpregistry` (1), `orgs` (1), `blueprints` (1), `sandbox` (1), `agents.MCPToolHandler` (2). `mcp.GraphObjectPatcher` is a named func type. Build + vet + unit tests pass.
+>
+> **Left as-is (out of scope):** `mcprelay.Service.OnChange(...)` (§5.7/§5.11) — it's an event-subscription callback, not a dependency-injection setter; no interface extracted.
 
-- [ ] 5.1 Define `AgentToolDispatcher` interface in `domain/mcp` — match method signature currently used via `SetAgentToolHandler`
-- [ ] 5.2 Define `EmbeddingWorkerController` interface in `domain/mcp` — match method signature currently used via `SetEmbeddingControlHandler`
-- [ ] 5.3 Define `GraphObjectPatcher` interface in `domain/mcp` — match method signature currently used via `SetGraphObjectPatcher`
-- [ ] 5.4 Define `SessionTitleHandler` interface in `domain/mcp` — match method signature currently used via `SetSessionTitleHandler`
-- [ ] 5.5 Define `ToolPoolInvalidator` interface in `domain/mcpregistry` — match method signature currently used via `SetToolPoolInvalidator`
-- [ ] 5.6 Define `OrgToolPoolInvalidator` interface in `domain/orgs` — match method signature currently used via `SetToolPoolInvalidator`
-- [ ] 5.7 Define `SessionChangeHandler` interface in `domain/mcprelay` — match method signature currently used via `OnChange`
-- [ ] 5.8 Update `domain/mcp` constructor(s) to accept the 4 interfaces as parameters (remove `SetXxx` methods)
-- [ ] 5.9 Update `domain/mcpregistry` constructor to accept `ToolPoolInvalidator` as parameter (remove `SetToolPoolInvalidator`)
-- [ ] 5.10 Update `domain/orgs` constructor to accept `OrgToolPoolInvalidator` as parameter (remove `SetToolPoolInvalidator`)
-- [ ] 5.11 Update `domain/mcprelay` constructor to accept `SessionChangeHandler` as parameter (remove `OnChange` setter)
-- [ ] 5.12 Update `cmd/server/main.go` — wire concrete agent/extraction/graph types to the new interfaces via `fx.Provide` or `fx.Annotate`; remove all `SetXxx()` calls from `fx.Invoke` blocks
-- [ ] 5.13 Verify build passes and server starts cleanly: `task build && task start && task status`
+- [x] 5.1–5.13 Setter injection removed (21 setters → constructor injection)
 
 ## 6. Graph/Journal Decoupling (GraphEventSink)
 
