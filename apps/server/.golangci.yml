@@ -33,6 +33,12 @@ linters:
       - linters:
           - unused
         path: cmd/swiftbridge/
+      # Swiftbridge uses an async cgo callback pattern (defer inside goroutines)
+      # that SA9010 flags as "deferred return function not called" — false positives.
+      - linters:
+          - staticcheck
+        path: cmd/swiftbridge/
+        text: "SA9010"
     paths:
       - third_party$
       - builtin$

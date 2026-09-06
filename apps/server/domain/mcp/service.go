@@ -2245,10 +2245,6 @@ func (s *Service) executeQueryEntities(ctx context.Context, projectID string, ar
 		}
 	}
 
-	if typeName == "" {
-		// type_name is now optional
-	}
-
 	limit := 10
 	if l, ok := args["limit"].(float64); ok {
 		limit = int(l)

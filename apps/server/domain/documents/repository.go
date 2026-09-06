@@ -531,7 +531,7 @@ func (r *Repository) BulkDeleteWithCascade(ctx context.Context, projectID string
 		}
 
 		// 8. Delete documents
-		result, err = tx.NewDelete().
+		_, err = tx.NewDelete().
 			Model((*Document)(nil)).
 			Where("id IN (?)", bun.In(existingIDs)).
 			Where("project_id = ?", projectID).

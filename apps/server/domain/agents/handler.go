@@ -1196,9 +1196,7 @@ func (h *Handler) ReceiveWebhook(c echo.Context) error {
 
 	// Parse payload
 	var payload WebhookTriggerPayloadDTO
-	if err := c.Bind(&payload); err != nil {
-		// Ignore bind errors — body is optional
-	}
+	_ = c.Bind(&payload) // body is optional
 
 	// Build metadata
 	metadata := map[string]any{
