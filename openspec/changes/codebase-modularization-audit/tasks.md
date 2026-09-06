@@ -22,6 +22,8 @@
 - [ ] 2.8 Retire unused package-level `RequireProject()` (0 usages) — delete or document as deprecated in favor of `auth.Middleware.RequireAuth()`
 - [ ] 2.9 Verify build passes and all auth-protected routes return 401 for unauthenticated requests: `task build && task test`
 
+> **DONE (Sep 2026):** 304 standard guards replaced (164 → `MustGetUser`, 140 removed as dead where `user` was unused). 10 remaining are correct edge cases (tuple-return helpers, DB-lookup nil checks, `agentcompat` custom errors, `invites` login redirect). 3 `getProjectID()` wrappers deleted (49 call sites → `auth.GetProjectUUID`). `RequireProject()` deleted. Build + vet + unit tests pass.
+
 ## 3. apperror Style Standardization
 
 - [ ] 3.1 Audit `pkg/apperror/` to confirm Style B constructors (`NewBadRequest`, `NewInternal`, `NewNotFound`, etc.) exist and are equivalent to Style A chaining
@@ -99,10 +101,12 @@
 
 > Re-sync (Sep 2026): **NEW.** The existing `.golangci.yml` disables `errcheck`, `staticcheck`, and `unused` via blanket `text: "."` exclusions — the linter is a no-op. Debt grew 3 months straight with zero gates. This track makes the cleanup stick.
 
-- [ ] 9.1 Remove the three blanket `text: "."` exclusions for `errcheck`, `staticcheck`, `unused`; replace with targeted `exclude-rules` only for confirmed-legacy violations (or a `//nolint` per-line baseline)
-- [ ] 9.2 Add a custom `golangci-lint` check (or `forbidigo`/`revive` rule) that fails CI on inline `user == nil` auth guards in `domain/*/handler.go` — force `RequireProject()` + `MustGetUser()`
-- [ ] 9.3 Add a rule failing on new `func (s *Service) Set[A-Z]` cross-domain setters — force constructor/`fx.Provide` injection
-- [ ] 9.4 Add a rule failing on new `type APIResponse|PaginatedResponse|SuccessResponse` definitions outside `pkg/httputil`
-- [ ] 9.5 Add a rule failing on new `apperror.Err*.With*` Style A chaining — force Style B `apperror.New*`
-- [ ] 9.6 Wire the rules into CI (lefthook pre-commit + a CI job) so violations block merge, not just flag
-- [ ] 9.7 Re-run `task lint` and get a clean baseline; record the current violation counts as the ratchet floor
+- [x] 9.1 Remove the three blanket `text: "."` exclusions for `errcheck`, `staticcheck`, `unused`; replace with targeted `exclude-rules` only for confirmed-legacy violations (or a `//nolint` per-line baseline)
+- [x] 9.2 Add a custom `golangci-lint` check (or `forbidigo`/`revive` rule) that fails CI on inline `user == nil` auth guards in `domain/*/handler.go` — force `RequireProject()` + `MustGetUser()`
+- [x] 9.3 Add a rule failing on new `func (s *Service) Set[A-Z]` cross-domain setters — force constructor/`fx.Provide` injection
+- [x] 9.4 Add a rule failing on new `type APIResponse|PaginatedResponse|SuccessResponse` definitions outside `pkg/httputil`
+- [x] 9.5 Add a rule failing on new `apperror.Err*.With*` Style A chaining — force Style B `apperror.New*`
+- [x] 9.6 Wire the rules into CI (lefthook pre-commit + a CI job) so violations block merge, not just flag
+- [x] 9.7 Re-run `task lint` and get a clean baseline; record the current violation counts as the ratchet floor
+
+> **DONE (Sep 2026):** §9 implemented as a grep-based ratchet rather than custom golangci plugins. `.golangci.yml` migrated to v2 + un-masked (148 staticcheck / 48 unused / 2 gofmt now visible). CI lint job uses `only-new-issues: true` + `fetch-depth: 0`. `apps/server/scripts/lint-ratchet.sh` gates the 4 structural patterns against baselines (auth guards 10, setters 21, Style-A 1167, response-type dupes 6); wired into lefthook pre-commit + the CI lint job.

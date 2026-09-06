@@ -165,10 +165,7 @@ func mapExecutorError(err error) *apperror.Error {
 // @Router       /api/admin/agents [get]
 // @Security     bearerAuth
 func (h *Handler) ListAgents(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	// Prefer URL :projectId param (project-scoped routes), fall back to header
 	projectID := c.Param("projectId")
@@ -209,10 +206,7 @@ func (h *Handler) ListAgents(c echo.Context) error {
 // @Router       /api/admin/agents/{id} [get]
 // @Security     bearerAuth
 func (h *Handler) GetAgent(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	id := c.Param("id")
 	if id == "" {
@@ -276,10 +270,7 @@ func (h *Handler) GetAgent(c echo.Context) error {
 // @Router       /api/admin/agents/{id}/runs [get]
 // @Security     bearerAuth
 func (h *Handler) GetAgentRuns(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	id := c.Param("id")
 	if id == "" {
@@ -335,10 +326,6 @@ func (h *Handler) GetAgentRuns(c echo.Context) error {
 // @Router       /api/admin/agents [post]
 // @Security     bearerAuth
 func (h *Handler) CreateAgent(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	var dto CreateAgentDTO
 	if err := c.Bind(&dto); err != nil {
@@ -443,10 +430,7 @@ func (h *Handler) CreateAgent(c echo.Context) error {
 // @Router       /api/admin/agents/{id} [patch]
 // @Security     bearerAuth
 func (h *Handler) UpdateAgent(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	id := c.Param("id")
 	if id == "" {
@@ -555,10 +539,7 @@ func (h *Handler) UpdateAgent(c echo.Context) error {
 // @Router       /api/projects/{projectId}/agents/{id}/enable [post]
 // @Security     bearerAuth
 func (h *Handler) EnableAgent(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	id := c.Param("id")
 	if id == "" {
@@ -604,10 +585,7 @@ func (h *Handler) EnableAgent(c echo.Context) error {
 // @Router       /api/admin/agents/{id} [delete]
 // @Security     bearerAuth
 func (h *Handler) DeleteAgent(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	id := c.Param("id")
 	if id == "" {
@@ -650,10 +628,7 @@ func (h *Handler) DeleteAgent(c echo.Context) error {
 // @Router       /api/admin/agents/{id}/trigger [post]
 // @Security     bearerAuth
 func (h *Handler) TriggerAgent(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	id := c.Param("id")
 	if id == "" {
@@ -808,10 +783,7 @@ func (h *Handler) TriggerAgent(c echo.Context) error {
 // @Router       /api/admin/agents/{id}/runs/{runId}/cancel [post]
 // @Security     bearerAuth
 func (h *Handler) CancelRun(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	agentID := c.Param("id")
 	if agentID == "" {
@@ -876,10 +848,7 @@ func (h *Handler) CancelRun(c echo.Context) error {
 // @Router       /api/admin/agents/{id}/pending-events [get]
 // @Security     bearerAuth
 func (h *Handler) GetPendingEvents(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	id := c.Param("id")
 	if id == "" {
@@ -952,10 +921,7 @@ func (h *Handler) GetPendingEvents(c echo.Context) error {
 // @Router       /api/admin/agents/{id}/batch-trigger [post]
 // @Security     bearerAuth
 func (h *Handler) BatchTrigger(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	id := c.Param("id")
 	if id == "" {
@@ -1054,10 +1020,7 @@ func (h *Handler) BatchTrigger(c echo.Context) error {
 
 // CreateWebhookHook handles POST /api/admin/agents/:id/hooks
 func (h *Handler) CreateWebhookHook(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	id := c.Param("id")
 	if id == "" {
@@ -1113,10 +1076,7 @@ func (h *Handler) CreateWebhookHook(c echo.Context) error {
 
 // ListWebhookHooks handles GET /api/admin/agents/:id/hooks
 func (h *Handler) ListWebhookHooks(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	id := c.Param("id")
 	if id == "" {
@@ -1150,10 +1110,7 @@ func (h *Handler) ListWebhookHooks(c echo.Context) error {
 
 // DeleteWebhookHook handles DELETE /api/admin/agents/:id/hooks/:hookId
 func (h *Handler) DeleteWebhookHook(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	agentID := c.Param("id")
 	hookID := c.Param("hookId")
@@ -1324,10 +1281,7 @@ func (h *Handler) ReceiveWebhook(c echo.Context) error {
 
 // ListDefinitions handles GET /api/projects/:projectId/agent-definitions
 func (h *Handler) ListDefinitions(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	// Prefer URL :projectId param (project-scoped routes), fall back to header
 	projectID := c.Param("projectId")
@@ -1353,10 +1307,7 @@ func (h *Handler) ListDefinitions(c echo.Context) error {
 
 // GetDefinition handles GET /api/projects/:projectId/agent-definitions/:id
 func (h *Handler) GetDefinition(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	id := c.Param("id")
 	if id == "" {
@@ -1396,10 +1347,7 @@ func (h *Handler) GetDefinition(c echo.Context) error {
 
 // CreateDefinition handles POST /api/projects/:projectId/agent-definitions
 func (h *Handler) CreateDefinition(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	// Prefer URL :projectId param (project-scoped routes), fall back to header
 	projectID := c.Param("projectId")
@@ -1512,10 +1460,7 @@ func (h *Handler) CreateDefinition(c echo.Context) error {
 
 // UpdateDefinition handles PATCH /api/projects/:projectId/agent-definitions/:id
 func (h *Handler) UpdateDefinition(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	id := c.Param("id")
 	if id == "" {
@@ -1615,10 +1560,7 @@ func (h *Handler) UpdateDefinition(c echo.Context) error {
 
 // DeleteDefinition handles DELETE /api/projects/:projectId/agent-definitions/:id
 func (h *Handler) DeleteDefinition(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	id := c.Param("id")
 	if id == "" {
@@ -1649,10 +1591,6 @@ func (h *Handler) DeleteDefinition(c echo.Context) error {
 
 // ListProjectRuns handles GET /api/projects/:projectId/agent-runs
 func (h *Handler) ListProjectRuns(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	projectID := c.Param("projectId")
 	if projectID == "" {
@@ -1719,10 +1657,6 @@ func (h *Handler) ListProjectRuns(c echo.Context) error {
 
 // GetProjectRun handles GET /api/projects/:projectId/agent-runs/:runId
 func (h *Handler) GetProjectRun(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	projectID := c.Param("projectId")
 	if projectID == "" {
@@ -1764,10 +1698,6 @@ func (h *Handler) GetProjectRun(c echo.Context) error {
 // @Router       /api/projects/{projectId}/agent-runs/{runId}/remember-status [get]
 // @Security     bearerAuth
 func (h *Handler) GetRunRememberStatus(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	projectID := c.Param("projectId")
 	if projectID == "" {
@@ -1809,10 +1739,6 @@ func (h *Handler) GetRunRememberStatus(c echo.Context) error {
 // @Router       /api/v1/runs/{runId} [get]
 // @Security     bearerAuth
 func (h *Handler) GetRunByID(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	runID := c.Param("runId")
 	if runID == "" {
@@ -1836,10 +1762,6 @@ func (h *Handler) GetRunByID(c echo.Context) error {
 
 // GetRunMessages handles GET /api/projects/:projectId/agent-runs/:runId/messages
 func (h *Handler) GetRunMessages(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	projectID := c.Param("projectId")
 	if projectID == "" {
@@ -1912,10 +1834,6 @@ func (h *Handler) GetRunMessages(c echo.Context) error {
 
 // GetRunToolCalls handles GET /api/projects/:projectId/agent-runs/:runId/tool-calls
 func (h *Handler) GetRunToolCalls(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	projectID := c.Param("projectId")
 	if projectID == "" {
@@ -1952,10 +1870,6 @@ func (h *Handler) GetRunToolCalls(c echo.Context) error {
 // GetProjectRunFull handles GET /api/projects/:projectId/agent-runs/:runId/full
 // Returns run + messages + toolCalls + parentRun in a single response (issue #192).
 func (h *Handler) GetProjectRunFull(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	projectID := c.Param("projectId")
 	if projectID == "" {
@@ -2021,10 +1935,6 @@ func (h *Handler) GetProjectRunFull(c echo.Context) error {
 // GetProjectRunStats handles GET /api/projects/:projectId/agent-runs/stats
 // Returns aggregate analytics computed server-side (issue #193).
 func (h *Handler) GetProjectRunStats(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	projectID := c.Param("projectId")
 	if projectID == "" {
@@ -2161,10 +2071,6 @@ func (h *Handler) GetProjectRunStats(c echo.Context) error {
 // GetProjectRunSessionStats handles GET /api/projects/:projectId/agent-runs/stats/sessions
 // Returns session-level analytics grouped by trigger metadata (issue #194).
 func (h *Handler) GetProjectRunSessionStats(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	projectID := c.Param("projectId")
 	if projectID == "" {
@@ -2252,10 +2158,6 @@ func (h *Handler) GetProjectRunSessionStats(c echo.Context) error {
 // It returns a per-step trace of the run, grouping messages and tool calls by
 // step number so callers can inspect each LLM invocation turn.
 func (h *Handler) GetRunSteps(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	projectID := c.Param("projectId")
 	if projectID == "" {
@@ -2331,10 +2233,6 @@ func (h *Handler) GetRunSteps(c echo.Context) error {
 // It returns run messages and tool calls as newline-delimited JSON (NDJSON).
 // This allows flow-server's LogStreamer to stream agent run output.
 func (h *Handler) GetRunStepsStream(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	runID := c.Param("runId")
 	if runID == "" {
@@ -2401,10 +2299,6 @@ func (h *Handler) GetRunStepsStream(c echo.Context) error {
 // @Router       /api/v1/runs/{runId}/logs [get]
 // @Security     bearerAuth
 func (h *Handler) GetRunLogs(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	runID := c.Param("runId")
 	if runID == "" {
@@ -2512,10 +2406,7 @@ func (h *Handler) GetRunLogs(c echo.Context) error {
 // @Router       /api/v1/agent/sessions/{id} [get]
 // @Security     bearerAuth
 func (h *Handler) GetSession(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	id := c.Param("id")
 	if id == "" {
@@ -2555,10 +2446,7 @@ func (h *Handler) GetSession(c echo.Context) error {
 // @Router       /api/admin/agent-definitions/{id}/sandbox-config [get]
 // @Security     bearerAuth
 func (h *Handler) GetSandboxConfig(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	id := c.Param("id")
 	if id == "" {
@@ -2608,10 +2496,7 @@ func (h *Handler) GetSandboxConfig(c echo.Context) error {
 // @Router       /api/admin/agent-definitions/{id}/sandbox-config [put]
 // @Security     bearerAuth
 func (h *Handler) UpdateSandboxConfig(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	id := c.Param("id")
 	if id == "" {
@@ -2680,10 +2565,7 @@ func (h *Handler) UpdateSandboxConfig(c echo.Context) error {
 // @Router       /api/projects/{projectId}/agent-questions/{questionId}/respond [post]
 // @Security     bearerAuth
 func (h *Handler) HandleRespondToQuestion(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	projectID := c.Param("projectId")
 	if projectID == "" {
@@ -2927,10 +2809,7 @@ func (h *Handler) resumeQuestionRun(c echo.Context, user *auth.AuthUser, run *Ag
 // Revokes a pending tool-policy confirmation: the question is marked cancelled,
 // the run resumes with the call treated as not taken, and the decision is audited.
 func (h *Handler) HandleCancelQuestion(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	projectID := c.Param("projectId")
 	if projectID == "" {
@@ -3050,10 +2929,6 @@ func (h *Handler) HandleCancelQuestion(c echo.Context) error {
 // @Router       /api/projects/{projectId}/agent-runs/{runId}/questions [get]
 // @Security     bearerAuth
 func (h *Handler) HandleListQuestionsByRun(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	projectID := c.Param("projectId")
 	if projectID == "" {
@@ -3102,10 +2977,6 @@ func (h *Handler) HandleListQuestionsByRun(c echo.Context) error {
 // @Router       /api/projects/{projectId}/agent-questions [get]
 // @Security     bearerAuth
 func (h *Handler) HandleListQuestionsByProject(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	projectID := c.Param("projectId")
 	if projectID == "" {
@@ -3152,10 +3023,6 @@ func (h *Handler) HandleListQuestionsByProject(c echo.Context) error {
 // @Router       /api/projects/{projectId}/agent-approvals [get]
 // @Security     bearerAuth
 func (h *Handler) HandleListToolApprovals(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	projectID := c.Param("projectId")
 	if projectID == "" {
@@ -3276,10 +3143,7 @@ func strPtr(s string) *string {
 
 // ListAgentOverrides handles GET /api/projects/:projectId/agent-definitions/overrides
 func (h *Handler) ListAgentOverrides(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	projectID := c.Param("projectId")
 	if projectID == "" {
@@ -3312,10 +3176,7 @@ func (h *Handler) ListAgentOverrides(c echo.Context) error {
 
 // GetAgentOverride handles GET /api/projects/:projectId/agent-definitions/overrides/:agentName
 func (h *Handler) GetAgentOverride(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	projectID := c.Param("projectId")
 	if projectID == "" {
@@ -3343,10 +3204,7 @@ func (h *Handler) GetAgentOverride(c echo.Context) error {
 
 // SetAgentOverride handles PUT /api/projects/:projectId/agent-definitions/overrides/:agentName
 func (h *Handler) SetAgentOverride(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	projectID := c.Param("projectId")
 	if projectID == "" {
@@ -3381,10 +3239,7 @@ func (h *Handler) SetAgentOverride(c echo.Context) error {
 
 // DeleteAgentOverride handles DELETE /api/projects/:projectId/agent-definitions/overrides/:agentName
 func (h *Handler) DeleteAgentOverride(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	projectID := c.Param("projectId")
 	if projectID == "" {
@@ -3420,10 +3275,7 @@ func (h *Handler) DeleteAgentOverride(c echo.Context) error {
 
 // GetProjectSetting handles GET /api/projects/:projectId/settings/:category/:key
 func (h *Handler) GetProjectSetting(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 	projectID := c.Param("projectId")
 	if projectID == "" {
 		projectID = user.ProjectID
@@ -3448,10 +3300,7 @@ func (h *Handler) GetProjectSetting(c echo.Context) error {
 
 // SetProjectSetting handles PUT /api/projects/:projectId/settings/:category/:key
 func (h *Handler) SetProjectSetting(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 	projectID := c.Param("projectId")
 	if projectID == "" {
 		projectID = user.ProjectID
@@ -3477,10 +3326,7 @@ func (h *Handler) SetProjectSetting(c echo.Context) error {
 
 // DeleteProjectSetting handles DELETE /api/projects/:projectId/settings/:category/:key
 func (h *Handler) DeleteProjectSetting(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 	projectID := c.Param("projectId")
 	if projectID == "" {
 		projectID = user.ProjectID

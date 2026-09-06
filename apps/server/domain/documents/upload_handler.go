@@ -119,10 +119,7 @@ func (h *UploadHandler) WithAllowedMIMETypes(csv string) *UploadHandler {
 
 // Upload handles POST /api/documents/upload (multipart file upload).
 func (h *UploadHandler) Upload(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 	if user.ProjectID == "" {
 		return apperror.ErrBadRequest.WithMessage("x-project-id header required")
 	}
@@ -211,10 +208,7 @@ func (h *UploadHandler) Upload(c echo.Context) error {
 // UploadBatch handles POST /api/documents/upload/batch (batch multipart file upload).
 // Max 100 files per batch, each max 10 MB. Files are processed concurrently via a worker pool.
 func (h *UploadHandler) UploadBatch(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 	if user.ProjectID == "" {
 		return apperror.ErrBadRequest.WithMessage("x-project-id header required")
 	}

@@ -687,10 +687,7 @@ func (h *Handler) TestProvider(c echo.Context) error {
 // @Failure 401 {object} apperror.Error
 // @Router /users/me/usage [get]
 func (h *Handler) GetCurrentUserUsageSummary(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	since, until := parseTimeRange(c)
 	rows, err := h.repo.GetUserUsageSummary(c.Request().Context(), user.ID, since, until)
@@ -713,10 +710,7 @@ func (h *Handler) GetCurrentUserUsageSummary(c echo.Context) error {
 // @Failure 401 {object} apperror.Error
 // @Router /users/me/usage/timeseries [get]
 func (h *Handler) GetCurrentUserUsageTimeSeries(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	granularity := c.QueryParam("granularity")
 	since, until := parseTimeRange(c)

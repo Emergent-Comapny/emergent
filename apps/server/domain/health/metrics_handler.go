@@ -7,7 +7,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/uptrace/bun"
 
-	"github.com/emergent-company/emergent.memory/pkg/apperror"
 	"github.com/emergent-company/emergent.memory/pkg/auth"
 )
 
@@ -75,10 +74,7 @@ const selectCounts = `
 // @Router       /api/metrics/jobs [get]
 // @Security     bearerAuth
 func (h *MetricsHandler) JobMetrics(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	ctx := c.Request().Context()
 

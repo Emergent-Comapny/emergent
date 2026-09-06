@@ -53,10 +53,6 @@ type CreateBackupRequestDTO struct {
 // @Router       /api/v1/organizations/{orgId}/backups [get]
 // @Security     bearerAuth
 func (h *Handler) ListBackups(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	orgID := c.Param("orgId")
 
@@ -109,10 +105,7 @@ func (h *Handler) ListBackups(c echo.Context) error {
 // @Router       /api/v1/projects/{projectId}/backups [post]
 // @Security     bearerAuth
 func (h *Handler) CreateBackup(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	projectID := c.Param("projectId")
 
@@ -176,10 +169,6 @@ func (h *Handler) CreateBackup(c echo.Context) error {
 // @Router       /api/v1/organizations/{orgId}/backups/{backupId} [get]
 // @Security     bearerAuth
 func (h *Handler) GetBackup(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	orgID := c.Param("orgId")
 	backupID := c.Param("backupId")
@@ -211,10 +200,6 @@ func (h *Handler) GetBackup(c echo.Context) error {
 // @Router       /api/v1/organizations/{orgId}/backups/{backupId}/download [get]
 // @Security     bearerAuth
 func (h *Handler) DownloadBackup(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	orgID := c.Param("orgId")
 	backupID := c.Param("backupId")
@@ -264,10 +249,6 @@ func (h *Handler) DownloadBackup(c echo.Context) error {
 // @Router       /api/v1/organizations/{orgId}/backups/{backupId} [delete]
 // @Security     bearerAuth
 func (h *Handler) DeleteBackup(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	orgID := c.Param("orgId")
 	backupID := c.Param("backupId")
@@ -310,10 +291,7 @@ type RestoreRequestDTO struct {
 // @Router       /api/v1/projects/{projectId}/restore [post]
 // @Security     bearerAuth
 func (h *Handler) RestoreBackup(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	var dto RestoreRequestDTO
 	if err := c.Bind(&dto); err != nil {
@@ -467,10 +445,6 @@ func (h *Handler) fetchBackupByID(ctx context.Context, backupID string) (*Backup
 // @Router       /api/v1/restores/{restoreId} [get]
 // @Security     bearerAuth
 func (h *Handler) GetRestoreStatus(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	restoreID := c.Param("restoreId")
 	job, err := h.service.GetRestore(c.Request().Context(), restoreID)
@@ -499,10 +473,6 @@ func (h *Handler) GetRestoreStatus(c echo.Context) error {
 // @Router       /api/superadmin/database-backups [get]
 // @Security     bearerAuth
 func (h *Handler) ListDatabaseBackups(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	backups, err := h.service.ListDatabaseBackups(c.Request().Context())
 	if err != nil {
@@ -526,10 +496,6 @@ func (h *Handler) ListDatabaseBackups(c echo.Context) error {
 // @Router       /api/superadmin/database-backups/{id}/download [get]
 // @Security     bearerAuth
 func (h *Handler) DownloadDatabaseBackup(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
 
 	id := c.Param("id")
 	url, err := h.service.GetDatabaseBackupDownloadURL(c.Request().Context(), id)

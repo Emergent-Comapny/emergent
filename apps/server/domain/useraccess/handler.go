@@ -5,7 +5,6 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/emergent-company/emergent.memory/pkg/apperror"
 	"github.com/emergent-company/emergent.memory/pkg/auth"
 )
 
@@ -31,10 +30,7 @@ func NewHandler(svc *Service) *Handler {
 // @Router       /user/orgs-and-projects [get]
 // @Security     bearerAuth
 func (h *Handler) GetOrgsAndProjects(c echo.Context) error {
-	user := auth.GetUser(c)
-	if user == nil {
-		return apperror.ErrUnauthorized
-	}
+	user := auth.MustGetUser(c)
 
 	tree, err := h.svc.GetAccessTree(c.Request().Context(), user.ID)
 	if err != nil {
